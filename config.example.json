@@ -1,0 +1,103 @@
+{
+  "server": {
+    "addr": "127.0.0.1:8080",
+    "read_header_timeout": "10s",
+    "read_timeout": "30s",
+    "write_timeout": "0s",
+    "idle_timeout": "120s",
+    "max_body_bytes": 10485760
+  },
+  "auth": {
+    "disable": false,
+    "api_keys_env": ["LLM_GATEWAY_API_KEY"]
+  },
+  "debug": {
+    "log_messages": false
+  },
+  "health": {
+    "enabled": false,
+    "interval": "30s",
+    "timeout": "5s",
+    "failure_threshold": 2,
+    "success_threshold": 1
+  },
+  "routing": {
+    "retry": {
+      "enabled": false,
+      "max_attempts": 1,
+      "backoff": "200ms",
+      "max_backoff": "1s",
+      "retry_on_status": [408, 429, 500, 502, 503, 504],
+      "retry_on_network_error": true,
+      "retry_on_timeout": true
+    },
+    "sticky_weighted": {
+      "enabled": true,
+      "header": "X-LLM-Gateway-Sticky-Key",
+      "fallback": "auth_key",
+      "ttl": "24h",
+      "max_entries": 10000
+    }
+  },
+  "model_discovery": {
+    "ttl": "10m",
+    "stale_while_revalidate": true
+  },
+  "providers": [
+    {
+      "name": "anthropic",
+      "type": "anthropic_compatible",
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "transport": {
+        "max_idle_conns": 1024,
+        "max_idle_conns_per_host": 256,
+        "idle_conn_timeout": "90s",
+        "dial_timeout": "10s",
+        "dial_keep_alive": "30s",
+        "tls_handshake_timeout": "10s",
+        "expect_continue_timeout": "1s",
+        "force_attempt_http2": true
+      },
+      "health": {
+        "enabled": true,
+        "probe_path": "/models",
+        "probe_method": "GET",
+        "expected_status": [200]
+      },
+      "concurrency": {
+        "max_in_flight": 0
+      },
+      "circuit_breaker": {
+        "enabled": false,
+        "failure_threshold": 5,
+        "success_threshold": 1,
+        "open_timeout": "30s"
+      },
+      "discover_models": true,
+      "model_prefix": "anthropic/",
+      "include_models": ["*"],
+      "exclude_models": []
+    },
+    {
+      "name": "openai",
+      "type": "openai_compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "discover_models": true,
+      "model_prefix": "openai/",
+      "include_models": ["*"],
+      "exclude_models": []
+    }
+  ],
+  "models": {
+    "claude-sonnet": {
+      "provider": "anthropic",
+      "provider_model": "claude-sonnet-4-6"
+    },
+    "gpt-main": {
+      "provider": "openai",
+      "provider_model": "gpt-4.1"
+    }
+  }
+}
