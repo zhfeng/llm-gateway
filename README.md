@@ -11,6 +11,8 @@ A Go LLM gateway that exposes Anthropic-compatible and OpenAI-compatible endpoin
 
 The gateway accepts Anthropic-style and OpenAI-style client requests, resolves the requested model through a unified model registry, and forwards the request to an `anthropic_compatible` or `openai_compatible` provider backend.
 
+Longer architecture, configuration, and operations notes live in [`docs/`](docs/).
+
 ## Run
 
 ```bash
