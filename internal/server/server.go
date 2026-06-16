@@ -79,7 +79,7 @@ func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *h
 		json.NewEncoder(w).Encode(body)
 	})
 
-	return Chain(mux, requestMetrics)
+	return Chain(mux, requestID, requestMetrics)
 }
 
 func requestMetrics(next http.Handler) http.Handler {
