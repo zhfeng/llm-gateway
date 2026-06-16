@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zhfeng/llm-gateway/internal/auth"
-	"github.com/zhfeng/llm-gateway/internal/auth/static"
 	"github.com/zhfeng/llm-gateway/internal/config"
 	"github.com/zhfeng/llm-gateway/internal/health"
 	"github.com/zhfeng/llm-gateway/internal/httpapi"
@@ -52,15 +50,6 @@ func Start(ctx context.Context, cfg *config.Runtime, registry *models.Registry, 
 }
 
 func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *health.Manager) http.Handler {
-	authn := auth.NewAuthenticatorChain()
-	authz := auth.NewAuthorizerChain()
-
-	if len(cfg.GatewayAPIKeys) > 0 {
-		authn.Add(static.NewAuthenticator(cfg.GatewayAPIKeys))
-	}
-
-	authMiddleware := AuthMiddleware(authn, authz, cfg.Config.Auth.Disable)
-
 	h := httpapi.New(registry, healthManager, cfg.GatewayAPIKeys, cfg.Config.Auth.Disable, cfg.Config.Server.MaxBodyBytes, cfg.Config.Debug.LogMessages, httpapi.Options{RetryEnabled: cfg.RetryEnabled, RetryMaxAttempts: cfg.RetryMaxAttempts, RetryBackoff: cfg.RetryBackoff, RetryMaxBackoff: cfg.RetryMaxBackoff, RetryOnStatus: cfg.RetryOnStatus, RetryOnNetworkError: cfg.RetryOnNetworkError, RetryOnTimeout: cfg.RetryOnTimeout, StickyWeightedEnabled: cfg.StickyWeightedEnabled, StickyWeightedHeader: cfg.StickyWeightedHeader, StickyWeightedFallback: cfg.StickyWeightedFallback})
 
 	apiMux := http.NewServeMux()
@@ -69,7 +58,7 @@ func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *h
 	apiMux.HandleFunc("/v1/messages", h.Messages)
 
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", Chain(apiMux, authMiddleware))
+	mux.Handle("/v1/", Chain(apiMux, h.Auth))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
