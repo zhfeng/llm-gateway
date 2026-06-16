@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/zhfeng/llm-gateway/internal/config"
 	"github.com/zhfeng/llm-gateway/internal/models"
@@ -38,6 +40,66 @@ func TestChainAppliesMiddlewareInOrder(t *testing.T) {
 	want := []string{"first-before", "second-before", "handler", "second-after", "first-after"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestRequestIDPreservesExistingHeader(t *testing.T) {
+	const want = "test-request-123"
+	var gotFromContext string
+	handler := requestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotFromContext = RequestID(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Request-ID", want)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if got := w.Header().Get("X-Request-ID"); got != want {
+		t.Fatalf("response X-Request-ID = %q, want %q", got, want)
+	}
+	if gotFromContext != want {
+		t.Fatalf("context request ID = %q, want %q", gotFromContext, want)
+	}
+}
+
+func TestRequestIDGeneratesHeaderWhenMissing(t *testing.T) {
+	var gotFromContext string
+	handler := requestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotFromContext = RequestID(r.Context())
+	}))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	got := w.Header().Get("X-Request-ID")
+	if got == "" {
+		t.Fatal("response X-Request-ID is empty")
+	}
+	if gotFromContext != got {
+		t.Fatalf("context request ID = %q, want response header value %q", gotFromContext, got)
+	}
+	if len(got) != 32 {
+		t.Fatalf("generated request ID length = %d, want 32", len(got))
+	}
+	if strings.IndexFunc(got, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) != -1 {
+		t.Fatalf("generated request ID contains whitespace or control characters: %q", got)
+	}
+}
+
+func TestHealthRouteIncludesRequestID(t *testing.T) {
+	const want = "health-request-123"
+	handler := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("X-Request-ID", want)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if got := w.Header().Get("X-Request-ID"); got != want {
+		t.Fatalf("response X-Request-ID = %q, want %q", got, want)
 	}
 }
 
