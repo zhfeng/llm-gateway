@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,15 +14,51 @@ import (
 	"github.com/zhfeng/llm-gateway/internal/models"
 )
 
-func Start(cfg *config.Runtime, registry *models.Registry, healthManager *health.Manager) error {
+func Start(ctx context.Context, cfg *config.Runtime, registry *models.Registry, healthManager *health.Manager) error {
 	if cfg.Config.Auth.Disable {
 		slog.Warn("gateway API key authentication is disabled; this is very dangerous in production and should only be used for local testing")
 	}
+	server := &http.Server{
+		Addr:              cfg.Config.Server.Addr,
+		Handler:           newHandler(cfg, registry, healthManager),
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		MaxHeaderBytes:    1 << 20,
+	}
+	slog.Info("starting gateway", "addr", cfg.Config.Server.Addr)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *health.Manager) http.Handler {
 	h := httpapi.New(registry, healthManager, cfg.GatewayAPIKeys, cfg.Config.Auth.Disable, cfg.Config.Server.MaxBodyBytes, cfg.Config.Debug.LogMessages, httpapi.Options{RetryEnabled: cfg.RetryEnabled, RetryMaxAttempts: cfg.RetryMaxAttempts, RetryBackoff: cfg.RetryBackoff, RetryMaxBackoff: cfg.RetryMaxBackoff, RetryOnStatus: cfg.RetryOnStatus, RetryOnNetworkError: cfg.RetryOnNetworkError, RetryOnTimeout: cfg.RetryOnTimeout, StickyWeightedEnabled: cfg.StickyWeightedEnabled, StickyWeightedHeader: cfg.StickyWeightedHeader, StickyWeightedFallback: cfg.StickyWeightedFallback})
+
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/v1/models", h.ListModels)
+	apiMux.HandleFunc("/v1/chat/completions", h.ChatCompletions)
+	apiMux.HandleFunc("/v1/messages", h.Messages)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/models", h.Auth(h.ListModels))
-	mux.HandleFunc("/v1/chat/completions", h.Auth(h.ChatCompletions))
-	mux.HandleFunc("/v1/messages", h.Auth(h.Messages))
+	mux.Handle("/v1/", Chain(apiMux, h.Auth))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -41,24 +79,13 @@ func Start(cfg *config.Runtime, registry *models.Registry, healthManager *health
 		json.NewEncoder(w).Encode(body)
 	})
 
-	server := &http.Server{
-		Addr:              cfg.Config.Server.Addr,
-		Handler:           requestLogger(mux),
-		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
-		ReadTimeout:       cfg.ReadTimeout,
-		WriteTimeout:      cfg.WriteTimeout,
-		IdleTimeout:       cfg.IdleTimeout,
-		MaxHeaderBytes:    1 << 20,
-	}
-	slog.Info("starting gateway", "addr", cfg.Config.Server.Addr)
-	return server.ListenAndServe()
+	return Chain(mux, requestMetrics)
 }
 
-func requestLogger(next http.Handler) http.Handler {
+func requestMetrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		slog.Info("request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 		next.ServeHTTP(w, r)
-		slog.Info("completed", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+		_ = time.Since(start)
 	})
 }

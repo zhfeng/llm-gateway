@@ -21,7 +21,7 @@ func TestAuthDisabledBypassesGatewayKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()
 
-	h.Auth(h.ListModels)(w, req)
+	h.Auth(http.HandlerFunc(h.ListModels)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -33,7 +33,7 @@ func TestAuthEnabledWithoutKeysFailsClosed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()
 
-	h.Auth(h.ListModels)(w, req)
+	h.Auth(http.HandlerFunc(h.ListModels)).ServeHTTP(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())

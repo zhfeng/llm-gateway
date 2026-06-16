@@ -57,11 +57,11 @@ func New(registry *models.Registry, healthManager *health.Manager, gatewayKeys [
 	return &HandlerGroup{registry: registry, health: healthManager, gatewayKeys: gatewayKeys, authDisabled: authDisabled, maxBodyBytes: maxBodyBytes, logMessages: logMessages, retryEnabled: opts.RetryEnabled, retryMaxAttempts: opts.RetryMaxAttempts, retryBackoff: opts.RetryBackoff, retryMaxBackoff: opts.RetryMaxBackoff, retryOnStatus: opts.RetryOnStatus, retryOnNetworkError: opts.RetryOnNetworkError, retryOnTimeout: opts.RetryOnTimeout, stickyWeightedEnabled: opts.StickyWeightedEnabled, stickyWeightedHeader: opts.StickyWeightedHeader, stickyWeightedFallback: opts.StickyWeightedFallback}
 }
 
-func (h *HandlerGroup) Auth(next http.HandlerFunc) http.HandlerFunc {
+func (h *HandlerGroup) Auth(next http.Handler) http.Handler {
 	if h.authDisabled {
 		return next
 	}
-	return func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(h.gatewayKeys) == 0 {
 			gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, "authentication_error", "gateway API key is required"))
 			return
@@ -78,8 +78,8 @@ func (h *HandlerGroup) Auth(next http.HandlerFunc) http.HandlerFunc {
 			gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, "authentication_error", "invalid API key"))
 			return
 		}
-		next(w, r)
-	}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *HandlerGroup) stickyKeyFromRequest(r *http.Request) string {

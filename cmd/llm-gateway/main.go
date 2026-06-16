@@ -5,6 +5,8 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/zhfeng/llm-gateway/internal/config"
@@ -15,6 +17,9 @@ import (
 )
 
 func main() {
+	serverCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	configPath := flag.String("config", "config.json", "path to config.json")
 	addr := flag.String("addr", "", "override server address")
 	flag.Parse()
@@ -35,6 +40,7 @@ func main() {
 			slog.Error("create provider", "provider", pcfg.Name, "error", err)
 			os.Exit(1)
 		}
+		p = provider.WithHooks(p, provider.NewForwardingLogHook())
 		p = provider.WithConcurrencyLimit(p, rt.ProviderConcurrencyLimits[pcfg.Name])
 		p = provider.WithCircuitBreaker(p, rt.ProviderCircuitBreakers[pcfg.Name])
 		providers[pcfg.Name] = p
@@ -46,13 +52,13 @@ func main() {
 	defer stopHealth()
 	go healthManager.Start(healthCtx)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	refreshCtx, cancelRefresh := context.WithTimeout(context.Background(), 30*time.Second)
 	go func() {
-		defer cancel()
-		registry.RefreshAll(ctx)
+		defer cancelRefresh()
+		registry.RefreshAll(refreshCtx)
 	}()
 
-	if err := server.Start(rt, registry, healthManager); err != nil {
+	if err := server.Start(serverCtx, rt, registry, healthManager); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}

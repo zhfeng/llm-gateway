@@ -67,13 +67,32 @@ Handlers preserve `Model` and set `ProviderModel` after registry resolution. Pro
 
 Static config routes override dynamic discovery conflicts.
 
-## Provider Protection Layers
+## HTTP Middleware Chain
 
-Provider instances are created once at startup and then wrapped with optional protection decorators:
+The server composes request handling with discrete middleware layers. Each middleware owns one concern and returns an `http.Handler`:
+
+```go
+type Middleware func(http.Handler) http.Handler
+```
+
+`internal/server.Chain` applies middleware in the listed order, so the first middleware is the outermost layer. The API routes are grouped behind the auth middleware, while health routes remain outside that chain:
 
 ```text
-circuit breaker → concurrency limiter → HTTP provider
+request metrics → /v1 API mux → auth → httpapi handler
+request metrics → /healthz or /readyz
 ```
+
+This keeps authentication, request metrics, routing, and health handling separate. Request metrics currently preserve the timing hook without emitting per-request INFO logs.
+
+## Provider Protection Layers
+
+Provider instances are created once at startup and then wrapped with forwarding hooks and optional protection decorators:
+
+```text
+circuit breaker → concurrency limiter → forwarding hooks → HTTP provider
+```
+
+Forwarding hooks bracket actual provider calls. `BeforeProviderCall` runs immediately before an upstream `Complete` or `Stream` call, and `AfterProviderCall` runs after the call completes, fails, or a stream finishes. Admission-control rejections from the circuit breaker or concurrency limiter do not fire forwarding hooks because no upstream forwarding happened.
 
 Health checks and model discovery bypass these decorators for now, so the gateway can still probe recovery and refresh model lists while user traffic is limited or circuits are open.
 

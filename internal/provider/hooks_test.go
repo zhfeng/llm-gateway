@@ -161,6 +161,15 @@ func TestHookedProviderStreamImmediateErrorReachesAfter(t *testing.T) {
 	}
 }
 
+func TestForwardingLogHookLifecycle(t *testing.T) {
+	hook := NewForwardingLogHook()
+	info := CallInfo{ProviderName: "test-provider", ProviderType: config.ProviderOpenAICompatible, Kind: CallKindComplete, Request: &protocol.Request{Model: "m", ProviderModel: "pm"}}
+	if err := hook.BeforeProviderCall(context.Background(), info); err != nil {
+		t.Fatal(err)
+	}
+	hook.AfterProviderCall(context.Background(), info, CallResult{Err: errors.New("provider failed")})
+}
+
 func TestHookedProviderStreamEventErrorReachesAfter(t *testing.T) {
 	calls := []string{}
 	streamErr := errors.New("stream event failed")
