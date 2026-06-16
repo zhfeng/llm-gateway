@@ -16,32 +16,8 @@ import (
 	"github.com/zhfeng/llm-gateway/internal/provider"
 )
 
-func TestAuthDisabledBypassesGatewayKey(t *testing.T) {
-	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, nil, true, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	w := httptest.NewRecorder()
-
-	h.Auth(http.HandlerFunc(h.ListModels)).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-}
-
-func TestAuthEnabledWithoutKeysFailsClosed(t *testing.T) {
-	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, nil, false, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	w := httptest.NewRecorder()
-
-	h.Auth(http.HandlerFunc(h.ListModels)).ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
-	}
-}
-
 func TestChatCompletionsUnknownModelReturns403(t *testing.T) {
-	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, nil, true, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"missing","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -57,7 +33,7 @@ func TestChatCompletionsUnknownModelReturns403(t *testing.T) {
 }
 
 func TestMessagesUnknownModelReturns403(t *testing.T) {
-	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, nil, true, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"missing","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -116,7 +92,7 @@ func (s streamProvider) ListModels(context.Context) ([]protocol.ModelInfo, error
 func (s streamProvider) HealthCheck(context.Context) error                        { return nil }
 
 func TestChatCompletionsOversizedBodyReturns413(t *testing.T) {
-	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, nil, true, 8, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, 8, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"} `))
 	w := httptest.NewRecorder()
 
@@ -128,7 +104,7 @@ func TestChatCompletionsOversizedBodyReturns413(t *testing.T) {
 }
 
 func TestMessagesOversizedBodyReturns413(t *testing.T) {
-	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, nil, true, 8, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	h := New(models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000), nil, 8, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m"} `))
 	w := httptest.NewRecorder()
 
@@ -225,7 +201,7 @@ func stickyTestHandler(seen *[]string, stickyEnabled bool, fallback string) *Han
 	cfg := config.Config{Models: map[string]config.ModelRoute{"m": {Targets: []config.ModelRouteTarget{{Provider: "p1", ProviderModel: "pm1", Weight: 1}, {Provider: "p2", ProviderModel: "pm2", Weight: 1}}}}}
 	providers := map[string]provider.Provider{"p1": prov, "p2": prov}
 	registry := models.New(cfg, providers, time.Hour, stickyEnabled, time.Hour, 10000)
-	return New(registry, nil, []string{"shared", "auth-session"}, true, 1<<20, false, Options{StickyWeightedEnabled: stickyEnabled, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: fallback, RetryMaxAttempts: 1})
+	return New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: stickyEnabled, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: fallback, RetryMaxAttempts: 1})
 }
 
 func TestCompleteWithRetryFailsOverToSecondTarget(t *testing.T) {
@@ -284,7 +260,7 @@ func retryTestHandler(seen *[]string, completeErr error, streamErr error, retryE
 	cfg := config.Config{Models: map[string]config.ModelRoute{"m": {Targets: []config.ModelRouteTarget{{Provider: "p1", ProviderModel: "pm1", Weight: 1}, {Provider: "p2", ProviderModel: "pm2", Weight: 0}}}}}
 	providers := map[string]provider.Provider{"p1": p1, "p2": p2}
 	registry := models.New(cfg, providers, time.Hour, false, time.Hour, 10000)
-	return New(registry, nil, nil, true, 1<<20, false, Options{RetryEnabled: retryEnabled, RetryMaxAttempts: 2, RetryBackoff: 0, RetryOnStatus: map[int]bool{http.StatusServiceUnavailable: true}, RetryOnNetworkError: true, RetryOnTimeout: true, StickyWeightedEnabled: false})
+	return New(registry, nil, 1<<20, false, Options{RetryEnabled: retryEnabled, RetryMaxAttempts: 2, RetryBackoff: 0, RetryOnStatus: map[int]bool{http.StatusServiceUnavailable: true}, RetryOnNetworkError: true, RetryOnTimeout: true, StickyWeightedEnabled: false})
 }
 
 func TestAdmissionErrorFailsOverAndDoesNotPoisonHealth(t *testing.T) {
@@ -299,7 +275,7 @@ func TestAdmissionErrorFailsOverAndDoesNotPoisonHealth(t *testing.T) {
 	providers := map[string]provider.Provider{"p1": p1, "p2": p2}
 	registry := models.New(cfg, providers, time.Hour, false, time.Hour, 10000)
 	healthManager := health.NewManager(providers, health.Config{Enabled: true, FailureThreshold: 1, SuccessThreshold: 1, ProviderEnabled: map[string]bool{"p1": true, "p2": true}})
-	h := New(registry, healthManager, nil, true, 1<<20, false, Options{RetryEnabled: true, RetryMaxAttempts: 2, RetryBackoff: 0, RetryOnStatus: map[int]bool{http.StatusTooManyRequests: true}, StickyWeightedEnabled: false})
+	h := New(registry, healthManager, 1<<20, false, Options{RetryEnabled: true, RetryMaxAttempts: 2, RetryBackoff: 0, RetryOnStatus: map[int]bool{http.StatusTooManyRequests: true}, StickyWeightedEnabled: false})
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 	w := httptest.NewRecorder()
 
@@ -323,7 +299,7 @@ func TestAnthropicStreamIncludesLifecycleEvents(t *testing.T) {
 		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", StopReason: protocol.StopEndTurn}},
 	}}
 	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
-	h := New(registry, nil, nil, true, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
 	w := httptest.NewRecorder()
 

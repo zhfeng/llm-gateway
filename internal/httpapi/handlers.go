@@ -24,8 +24,6 @@ import (
 type HandlerGroup struct {
 	registry               *models.Registry
 	health                 *health.Manager
-	gatewayKeys            []string
-	authDisabled           bool
 	maxBodyBytes           int64
 	logMessages            bool
 	retryEnabled           bool
@@ -53,33 +51,8 @@ type Options struct {
 	StickyWeightedFallback string
 }
 
-func New(registry *models.Registry, healthManager *health.Manager, gatewayKeys []string, authDisabled bool, maxBodyBytes int64, logMessages bool, opts Options) *HandlerGroup {
-	return &HandlerGroup{registry: registry, health: healthManager, gatewayKeys: gatewayKeys, authDisabled: authDisabled, maxBodyBytes: maxBodyBytes, logMessages: logMessages, retryEnabled: opts.RetryEnabled, retryMaxAttempts: opts.RetryMaxAttempts, retryBackoff: opts.RetryBackoff, retryMaxBackoff: opts.RetryMaxBackoff, retryOnStatus: opts.RetryOnStatus, retryOnNetworkError: opts.RetryOnNetworkError, retryOnTimeout: opts.RetryOnTimeout, stickyWeightedEnabled: opts.StickyWeightedEnabled, stickyWeightedHeader: opts.StickyWeightedHeader, stickyWeightedFallback: opts.StickyWeightedFallback}
-}
-
-func (h *HandlerGroup) Auth(next http.Handler) http.Handler {
-	if h.authDisabled {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(h.gatewayKeys) == 0 {
-			gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, "authentication_error", "gateway API key is required"))
-			return
-		}
-		provided := authKeyFromRequest(r)
-		valid := false
-		for _, key := range h.gatewayKeys {
-			if provided == key {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, "authentication_error", "invalid API key"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+func New(registry *models.Registry, healthManager *health.Manager, maxBodyBytes int64, logMessages bool, opts Options) *HandlerGroup {
+	return &HandlerGroup{registry: registry, health: healthManager, maxBodyBytes: maxBodyBytes, logMessages: logMessages, retryEnabled: opts.RetryEnabled, retryMaxAttempts: opts.RetryMaxAttempts, retryBackoff: opts.RetryBackoff, retryMaxBackoff: opts.RetryMaxBackoff, retryOnStatus: opts.RetryOnStatus, retryOnNetworkError: opts.RetryOnNetworkError, retryOnTimeout: opts.RetryOnTimeout, stickyWeightedEnabled: opts.StickyWeightedEnabled, stickyWeightedHeader: opts.StickyWeightedHeader, stickyWeightedFallback: opts.StickyWeightedFallback}
 }
 
 func (h *HandlerGroup) stickyKeyFromRequest(r *http.Request) string {
