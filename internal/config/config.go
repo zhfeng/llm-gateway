@@ -40,6 +40,13 @@ type AuthConfig struct {
 	Disable    bool     `json:"disable"`
 	APIKeys    []string `json:"api_keys"`
 	APIKeysEnv []string `json:"api_keys_env"`
+
+	Authenticators []AuthProviderConfig `json:"authenticators"`
+}
+
+type AuthProviderConfig struct {
+	Type   string                 `json:"type"`
+	Config map[string]interface{} `json:"config"`
 }
 
 type DebugConfig struct {
