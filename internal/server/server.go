@@ -61,7 +61,7 @@ func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *h
 
 	authMiddleware := AuthMiddleware(authn, authz, cfg.Config.Auth.Disable)
 
-	h := httpapi.New(registry, healthManager, cfg.GatewayAPIKeys, cfg.Config.Auth.Disable, cfg.Config.Server.MaxBodyBytes, cfg.Config.Debug.LogMessages, httpapi.Options{RetryEnabled: cfg.RetryEnabled, RetryMaxAttempts: cfg.RetryMaxAttempts, RetryBackoff: cfg.RetryBackoff, RetryMaxBackoff: cfg.RetryMaxBackoff, RetryOnStatus: cfg.RetryOnStatus, RetryOnNetworkError: cfg.RetryOnNetworkError, RetryOnTimeout: cfg.RetryOnTimeout, StickyWeightedEnabled: cfg.StickyWeightedEnabled, StickyWeightedHeader: cfg.StickyWeightedHeader, StickyWeightedFallback: cfg.StickyWeightedFallback})
+	h := httpapi.New(registry, healthManager, cfg.Config.Server.MaxBodyBytes, cfg.Config.Debug.LogMessages, httpapi.Options{RetryEnabled: cfg.RetryEnabled, RetryMaxAttempts: cfg.RetryMaxAttempts, RetryBackoff: cfg.RetryBackoff, RetryMaxBackoff: cfg.RetryMaxBackoff, RetryOnStatus: cfg.RetryOnStatus, RetryOnNetworkError: cfg.RetryOnNetworkError, RetryOnTimeout: cfg.RetryOnTimeout, StickyWeightedEnabled: cfg.StickyWeightedEnabled, StickyWeightedHeader: cfg.StickyWeightedHeader, StickyWeightedFallback: cfg.StickyWeightedFallback})
 
 	apiMux := http.NewServeMux()
 	apiMux.HandleFunc("/v1/models", h.ListModels)
