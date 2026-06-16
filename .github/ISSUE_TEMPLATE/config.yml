@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/zhfeng/llm-gateway/discussions
+    about: Ask questions, share ideas, and discuss usage here.
+  - name: Documentation
+    url: https://github.com/zhfeng/llm-gateway/tree/main/docs
+    about: Architecture, concepts, operations, and configuration reference.

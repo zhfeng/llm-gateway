@@ -66,7 +66,7 @@ Keep provider-specific local configs and generated binaries untracked under
 `bin/` when they should not be committed:
 
 ```bash
-./bin/llm-gateway -config bin/config.volcengine.example.json
+./bin/llm-gateway -config bin/config.local-provider.example.json
 ```
 
 Never commit real provider API keys, local `.env` files, swap files, or generated

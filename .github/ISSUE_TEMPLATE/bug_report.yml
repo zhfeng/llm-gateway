@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a problem with llm-gateway
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please fill in as much as you can.
+  - type: checkboxes
+    id: duplicate-check
+    attributes:
+      label: Duplicate check
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: This is a functional bug, not a security vulnerability (those must go through SECURITY.md)
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including expected vs. actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Run `llm-gateway ...`
+        2. Send a request to `/v1/...`
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the gateway version or commit and relevant runtime details.
+      value: |
+        - llm-gateway version/commit:
+        - OS / arch:
+        - Go version (if building from source):
+        - Client protocol: Anthropic-compatible / OpenAI-compatible
+        - Provider type: anthropic_compatible / openai_compatible
+        - Model alias:
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: Relevant config snippets with API keys, tokens, and secrets removed.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant output.
+        Redact API keys, tokens, prompts, completions, and any other secrets before pasting because this issue is public.
+      render: shell
+    validations:
+      required: false
