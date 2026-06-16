@@ -165,8 +165,8 @@ Legacy single-target alias:
 ```json
 "models": {
   "code-main": {
-    "provider": "volcengine-ark",
-    "provider_model": "ark-code-latest"
+    "provider": "provider-a",
+    "provider_model": "model-large"
   }
 }
 ```
@@ -178,8 +178,8 @@ Weighted multi-target alias:
   "code-main": {
     "policy": { "type": "weighted" },
     "targets": [
-      { "provider": "volcengine-ark", "provider_model": "ark-code-latest", "weight": 80 },
-      { "provider": "minimax", "provider_model": "MiniMax-M2", "weight": 20 }
+      { "provider": "provider-a", "provider_model": "model-large", "weight": 80 },
+      { "provider": "provider-b", "provider_model": "model-balanced", "weight": 20 }
     ]
   }
 }

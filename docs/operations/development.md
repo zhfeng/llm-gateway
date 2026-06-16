@@ -29,7 +29,7 @@ Or with the built binary:
 A local provider-specific test config can live under `bin/` and remain untracked:
 
 ```bash
-./bin/llm-gateway -config bin/config.volcengine.example.json
+./bin/llm-gateway -config bin/config.local-provider.example.json
 ```
 
 ## Formatting

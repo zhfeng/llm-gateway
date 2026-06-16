@@ -25,171 +25,34 @@ Optional address override:
 go run ./cmd/llm-gateway -config config.example.json -addr 127.0.0.1:8080
 ```
 
-## Config
+## Architecture
 
-Providers use a `base_url` that already includes the API prefix, usually `/v1`. The gateway appends endpoint paths such as `/messages`, `/chat/completions`, and `/models`.
+`llm-gateway` is a single-binary Go HTTP gateway. It accepts Anthropic-compatible and OpenAI-compatible client requests, normalizes them into an internal protocol model, resolves the requested public model alias through a registry, and forwards the request to a selected provider adapter.
 
-```json
-{
-  "server": {
-    "addr": "127.0.0.1:8080",
-    "read_header_timeout": "10s",
-    "read_timeout": "30s",
-    "write_timeout": "0s",
-    "idle_timeout": "120s",
-    "max_body_bytes": 10485760
-  },
-  "auth": {
-    "disable": false,
-    "api_keys_env": ["LLM_GATEWAY_API_KEY"]
-  },
-  "debug": {
-    "log_messages": false
-  },
-  "model_discovery": {
-    "ttl": "10m",
-    "stale_while_revalidate": true
-  },
-  "providers": [
-    {
-      "name": "anthropic",
-      "type": "anthropic_compatible",
-      "base_url": "https://api.anthropic.com/v1",
-      "api_key_env": "ANTHROPIC_API_KEY",
-      "transport": {
-        "max_idle_conns": 1024,
-        "max_idle_conns_per_host": 256,
-        "idle_conn_timeout": "90s",
-        "dial_timeout": "10s",
-        "dial_keep_alive": "30s",
-        "tls_handshake_timeout": "10s",
-        "expect_continue_timeout": "1s",
-        "force_attempt_http2": true
-      },
-      "discover_models": true,
-      "model_prefix": "anthropic/",
-      "include_models": ["*"],
-      "exclude_models": []
-    },
-    {
-      "name": "openai",
-      "type": "openai_compatible",
-      "base_url": "https://api.openai.com/v1",
-      "api_key_env": "OPENAI_API_KEY",
-      "discover_models": true,
-      "model_prefix": "openai/",
-      "include_models": ["*"],
-      "exclude_models": []
-    }
-  ],
-  "models": {
-    "claude-sonnet": {
-      "provider": "anthropic",
-      "provider_model": "claude-sonnet-4-6"
-    },
-    "gpt-main": {
-      "provider": "openai",
-      "provider_model": "gpt-4.1"
-    }
-  }
-}
+Core components:
+
+- `cmd/llm-gateway` loads configuration and wires the server.
+- `internal/httpapi` handles auth, request parsing, routing, retry/failover, and response encoding.
+- `internal/models` stores static aliases, dynamic discovery results, and weighted/sticky routing state.
+- `internal/provider` adapts the internal protocol to Anthropic-compatible or OpenAI-compatible upstream APIs.
+- `internal/health` tracks provider readiness for `/readyz` and routing decisions.
+
+Request flow:
+
+```text
+client request
+  → HTTP API handler
+  → gateway auth and body limits
+  → protocol normalization
+  → model registry resolution
+  → provider adapter
+  → upstream LLM backend
+  → protocol-specific response encoder
 ```
 
-Static `models` entries are exposed exactly as configured and take precedence over dynamically discovered models. Dynamic models discovered from provider `/models` use `model_prefix` when configured.
+Streaming follows the same path, but provider adapters return internal stream events that the HTTP layer flushes as Anthropic or OpenAI SSE frames.
 
-A static model alias can route across multiple provider targets with weighted selection:
-
-```json
-{
-  "models": {
-    "code-main": {
-      "policy": { "type": "weighted" },
-      "targets": [
-        { "provider": "anthropic", "provider_model": "claude-sonnet-4-6", "weight": 80 },
-        { "provider": "openai", "provider_model": "gpt-4.1", "weight": 20 }
-      ]
-    }
-  }
-}
-```
-
-Weighted routing is sticky by default so coding-agent conversations keep using the same selected provider. The gateway first looks for `X-LLM-Gateway-Sticky-Key`; if absent, it falls back to a hash of the gateway auth key when `routing.sticky_weighted.fallback` is `auth_key`:
-
-```json
-{
-  "routing": {
-    "sticky_weighted": {
-      "enabled": true,
-      "header": "X-LLM-Gateway-Sticky-Key",
-      "fallback": "auth_key",
-      "ttl": "24h",
-      "max_entries": 10000
-    }
-  }
-}
-```
-
-Provider health checks and retry/failover are opt-in. `/healthz` remains static liveness; `/readyz` includes provider health details when enabled:
-
-```json
-{
-  "health": {
-    "enabled": false,
-    "interval": "30s",
-    "timeout": "5s",
-    "failure_threshold": 2,
-    "success_threshold": 1
-  },
-  "routing": {
-    "retry": {
-      "enabled": false,
-      "max_attempts": 1,
-      "backoff": "200ms",
-      "max_backoff": "1s",
-      "retry_on_status": [408, 429, 500, 502, 503, 504],
-      "retry_on_network_error": true,
-      "retry_on_timeout": true
-    }
-  }
-}
-```
-
-Providers can also opt into per-provider probes, concurrency limits, and circuit breakers:
-
-```json
-{
-  "health": {
-    "enabled": true,
-    "probe_path": "/models",
-    "probe_method": "GET",
-    "expected_status": [200]
-  },
-  "concurrency": {
-    "max_in_flight": 32
-  },
-  "circuit_breaker": {
-    "enabled": true,
-    "failure_threshold": 5,
-    "success_threshold": 1,
-    "open_timeout": "30s"
-  }
-}
-```
-
-Concurrency-limit errors return `429`; open circuit breaker errors return `503`. When retry is enabled and those statuses are retryable, the gateway can fail over to another target.
-
-Dynamic discovery can be filtered per provider with shell-style glob patterns:
-
-```json
-{
-  "include_models": ["doubao-*", "deepseek-*"],
-  "exclude_models": ["*-embedding-*", "*-t2i-*"]
-}
-```
-
-`include_models` is applied first. If it is empty, all discovered models are included by default. `exclude_models` is applied after includes. Static `models` aliases are not affected by these filters.
-
-Set `debug.log_messages` to `true` to log incoming client bodies, outgoing provider bodies, and upstream streaming events. These logs may contain prompt and completion content, so keep it disabled outside local debugging.
+See [`docs/architecture.md`](docs/architecture.md) for the full component map and request flow. See [`docs/reference/configuration.md`](docs/reference/configuration.md) for configuration fields, including provider setup, routing aliases, health checks, and transport options.
 
 ## Testing without gateway authentication
 
@@ -221,48 +84,15 @@ For Claude Code, you can also configure `~/.claude/settings.json` to call this g
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:8080/v1",
     "ANTHROPIC_AUTH_TOKEN": "${LLM_GATEWAY_API_KEY}",
-    "ANTHROPIC_MODEL": "ark-code-latest",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ark-code-latest",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "ark-code-latest",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "ark-code-latest"
+    "ANTHROPIC_MODEL": "code-main",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "code-fast",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "code-main",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "code-large"
   }
 }
 ```
 
-This mirrors a direct Volcengine Ark setup where Claude Code points at `https://ark.cn-beijing.volces.com/api/coding`, but moves that provider connection behind the gateway.
-
-## Volcengine Ark Anthropic-compatible provider
-
-Volcengine Ark exposes an Anthropic-compatible endpoint that can be configured as a gateway provider.
-
-The relevant provider config is:
-
-```json
-{
-  "name": "volcengine-ark",
-  "type": "anthropic_compatible",
-  "base_url": "https://ark.cn-beijing.volces.com/api/coding",
-  "api_key_env": "VOLCENGINE_API_KEY",
-  "api_key_header": "Authorization",
-  "api_key_scheme": "Bearer",
-  "discover_models": true,
-  "model_prefix": "volcengine/",
-  "include_models": ["*"],
-  "exclude_models": ["*-embedding-*", "*-t2i-*", "*-i2i-*", "*-t2v-*", "*-i2v-*"]
-}
-```
-
-Then point Claude Code at the gateway:
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8080/v1",
-    "ANTHROPIC_AUTH_TOKEN": "local-gateway-key",
-    "ANTHROPIC_MODEL": "ark-code-latest"
-  }
-}
-```
+Use any configured gateway model alias for `ANTHROPIC_MODEL`, such as `code-main`, `code-fast`, or `code-large`.
 
 ## OpenAI/Codex-style usage
 
