@@ -3,8 +3,6 @@ name: PR Commands
 on:
   issue_comment:
     types: [created]
-  pull_request_review:
-    types: [submitted]
 
 permissions:
   contents: read
@@ -13,7 +11,7 @@ permissions:
 
 jobs:
   execute:
-    if: github.event.issue.pull_request != null || github.event.review != null
+    if: github.event.issue.pull_request != null
     runs-on: ubuntu-latest
     steps:
       - uses: jpmcb/prow-github-actions@c44ac3a57d67639e39e4a4988b52049ef45b80dd # v2.0.0
