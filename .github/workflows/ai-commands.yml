@@ -1,0 +1,102 @@
+name: AI Commands
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  command:
+    if: startsWith(github.event.comment.body, '/ai ')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Handle AI command
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue = context.payload.issue;
+            const comment = context.payload.comment;
+            const body = comment.body.trim();
+            const actor = comment.user.login;
+
+            const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner,
+              repo,
+              username: actor,
+            });
+            const allowed = ['admin', 'maintain', 'write'].includes(permission.data.permission);
+            if (!allowed) {
+              await github.rest.reactions.createForIssueComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+                content: '-1',
+              });
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: `@${actor} is not allowed to run AI workflow commands. Required permission: write, maintain, or admin.`,
+              });
+              return;
+            }
+
+            const command = body.split(/\s+/).slice(0, 2).join(' ').toLowerCase();
+            const labels = issue.labels.map((label) => typeof label === 'string' ? label : label.name);
+
+            if (command === '/ai plan') {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: ['ai/good-to-work'],
+              });
+              for (const label of ['ai/blocked', 'ai/done']) {
+                if (labels.includes(label)) {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name: label }).catch((e) => {
+                    if (e.status !== 404) throw e;
+                  });
+                }
+              }
+              await github.rest.reactions.createForIssueComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+                content: '+1',
+              });
+              return;
+            }
+
+            if (command === '/ai revise') {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: ['ai/revise-plan'],
+              });
+              await github.rest.reactions.createForIssueComment({
+                owner,
+                repo,
+                comment_id: comment.id,
+                content: '+1',
+              });
+              return;
+            }
+
+            await github.rest.reactions.createForIssueComment({
+              owner,
+              repo,
+              comment_id: comment.id,
+              content: 'confused',
+            });
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issue.number,
+              body: 'Supported AI commands: `/ai plan`, `/ai revise`.',
+            });
