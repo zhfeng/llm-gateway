@@ -330,3 +330,44 @@ func containsJSONKey(data []byte, key string) bool {
 	_, ok := obj[key]
 	return ok
 }
+
+func TestAnthropicMessageEmptyContentUsesPlaceholder(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  protocol.Message
+	}{
+		{
+			name: "user message with nil content",
+			msg:  protocol.Message{Role: protocol.RoleUser, Content: nil},
+		},
+		{
+			name: "user message with empty string content",
+			msg:  protocol.Message{Role: protocol.RoleUser, Content: protocol.TextContent("")},
+		},
+		{
+			name: "assistant message with empty content and no tool calls",
+			msg:  protocol.Message{Role: protocol.RoleAssistant, Content: protocol.TextContent("")},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toAnthropicMessage(tt.msg)
+			if len(got.Content) != 1 || got.Content[0].Type != "text" || got.Content[0].Text != "..." {
+				t.Fatalf("expected single {text, \"...\"} placeholder, got: %+v", got.Content)
+			}
+		})
+	}
+}
+
+func TestAnthropicMessageAssistantWithToolCallsPreservesToolUse(t *testing.T) {
+	msg := toAnthropicMessage(protocol.Message{
+		Role:      protocol.RoleAssistant,
+		ToolCalls: []protocol.ToolCall{{ID: "call_1", Name: "get_weather", Input: json.RawMessage(`{"city":"SF"}`)}},
+	})
+	if len(msg.Content) != 1 || msg.Content[0].Type != "tool_use" {
+		t.Fatalf("expected tool_use block preserved, got: %+v", msg.Content)
+	}
+	if msg.Content[0].ID != "call_1" || msg.Content[0].Name != "get_weather" {
+		t.Fatalf("unexpected tool_use block: %+v", msg.Content[0])
+	}
+}
