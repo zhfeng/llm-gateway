@@ -230,6 +230,7 @@ func toAnthropicRequest(req *protocol.Request, streaming bool) anthropicRequest 
 		messages = append(messages, toAnthropicMessage(msg))
 	}
 	messages = mergeAnthropicMessages(messages)
+	messages = ensureFirstMessageUser(messages)
 	tools := make([]anthropicTool, 0, len(req.Tools))
 	for _, tool := range req.Tools {
 		schema := tool.InputSchema
@@ -302,6 +303,24 @@ func isEmptyTextParts(parts []anthropicContentPart) bool {
 		}
 	}
 	return true
+}
+
+// ensureFirstMessageUser prepends a synthetic user turn when the first
+// (non-system) message is not role "user". Anthropic's Messages API rejects
+// any conversation that does not begin with a user turn, so a client prefill
+// that seeds an assistant message (or a re-played transcript that starts
+// mid-conversation) would otherwise 400 upstream. Matches new-api's
+// relay-claude.go:319-333 behavior, using the same "..." placeholder we use
+// for empty content (sub-item 1.1).
+func ensureFirstMessageUser(messages []anthropicMessage) []anthropicMessage {
+	if len(messages) == 0 || messages[0].Role == protocol.RoleUser {
+		return messages
+	}
+	synthetic := anthropicMessage{
+		Role:    protocol.RoleUser,
+		Content: []anthropicContentPart{{Type: "text", Text: "..."}},
+	}
+	return append([]anthropicMessage{synthetic}, messages...)
 }
 
 func mergeAnthropicMessages(messages []anthropicMessage) []anthropicMessage {
