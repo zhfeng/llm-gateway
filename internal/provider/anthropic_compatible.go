@@ -285,10 +285,23 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 		}
 		parts = append(parts, anthropicContentPart{Type: "tool_use", ID: sanitizeToolID(call.ID), Name: call.Name, Input: input})
 	}
-	if len(parts) == 0 {
-		parts = append(parts, anthropicContentPart{Type: "text", Text: ""})
+	if isEmptyTextParts(parts) {
+		parts = []anthropicContentPart{{Type: "text", Text: "..."}}
 	}
 	return anthropicMessage{Role: role, Content: parts}
+}
+
+// isEmptyTextParts reports whether parts is empty or contains only text blocks
+// with empty strings. In either case the message would be rejected by Anthropic
+// with a 400 invalid_request_error, so the caller substitutes a single
+// {type:"text", text:"..."} placeholder (matching new-api's relay-claude.go).
+func isEmptyTextParts(parts []anthropicContentPart) bool {
+	for _, p := range parts {
+		if p.Type != "text" || p.Text != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func mergeAnthropicMessages(messages []anthropicMessage) []anthropicMessage {
