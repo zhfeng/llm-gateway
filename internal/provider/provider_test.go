@@ -348,6 +348,35 @@ func TestAnthropicMessageEmptyContentUsesPlaceholder(t *testing.T) {
 			name: "assistant message with empty content and no tool calls",
 			msg:  protocol.Message{Role: protocol.RoleAssistant, Content: protocol.TextContent("")},
 		},
+		{
+			// protocol.TextContent("") returns nil, so the cases above collapse
+			// onto the nil-content path. These explicit single-empty-text-block
+			// cases exercise the "only empty text blocks" branch of
+			// isEmptyTextParts, which is the shape produced when a client sends
+			// {"role":"user","content":[{"type":"text","text":""}]} verbatim.
+			name: "user message with single empty text block",
+			msg: protocol.Message{
+				Role:    protocol.RoleUser,
+				Content: []protocol.ContentBlock{{Type: protocol.ContentText, Text: ""}},
+			},
+		},
+		{
+			name: "assistant message with single empty text block and no tool calls",
+			msg: protocol.Message{
+				Role:    protocol.RoleAssistant,
+				Content: []protocol.ContentBlock{{Type: protocol.ContentText, Text: ""}},
+			},
+		},
+		{
+			name: "user message with multiple empty text blocks",
+			msg: protocol.Message{
+				Role: protocol.RoleUser,
+				Content: []protocol.ContentBlock{
+					{Type: protocol.ContentText, Text: ""},
+					{Type: protocol.ContentText, Text: ""},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
