@@ -356,6 +356,40 @@ func TestAnthropicMessageRoleToolPreservesStructuredContent(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessageRoleToolPreservesToolResultText(t *testing.T) {
+	// A tool-role message whose Content is a tool_result ContentBlock carrying
+	// only Text (no structured Content) used to fall through to
+	// ContentTextValue, which only concatenates ContentText blocks and would
+	// therefore emit an empty tool_result. The dedicated fallback should
+	// surface the Text instead.
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_4",
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_4",
+			Text:      "tool said hi",
+		}},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	part := msg.Content[0]
+	if part.Type != "tool_result" || part.ToolUseID != "call_4" {
+		t.Fatalf("unexpected tool result header: %+v", part)
+	}
+	if s, ok := part.Content.(string); !ok || s != "tool said hi" {
+		t.Fatalf("expected tool_result.Text surfaced as string content, got %T %v", part.Content, part.Content)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"content":"tool said hi"`)) {
+		t.Fatalf("expected text content in JSON, got %s", out)
+	}
+}
+
 func TestOpenAIStreamOptionsOnlyForStreaming(t *testing.T) {
 	req := &protocol.Request{ProviderModel: "provider-model", Messages: []protocol.Message{{Role: protocol.RoleUser, Content: protocol.TextContent("hi")}}}
 	nonStreaming, err := json.Marshal(toOpenAIRequest(req, false))

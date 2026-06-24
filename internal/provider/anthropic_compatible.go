@@ -263,6 +263,11 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 		part := anthropicContentPart{Type: "tool_result", ToolUseID: msg.ToolCallID}
 		if raw := firstToolResultRawContent(msg.Content); len(raw) > 0 {
 			part.Content = raw
+		} else if text := firstToolResultText(msg.Content); text != "" {
+			// Tool-result block carrying only plain text (no structured payload):
+			// forward that text directly so it isn't dropped by ContentTextValue,
+			// which only concatenates ContentText blocks.
+			part.Content = text
 		} else {
 			part.Content = protocol.ContentTextValue(msg.Content)
 		}
@@ -318,6 +323,20 @@ func firstToolResultRawContent(blocks []protocol.ContentBlock) json.RawMessage {
 		}
 	}
 	return nil
+}
+
+// firstToolResultText returns the Text of the first tool_result block that
+// carries plain text (no structured Content). This is the RoleTool fallback
+// after firstToolResultRawContent: tool-role messages whose Content is a
+// single tool_result ContentBlock with Text would otherwise be dropped by
+// ContentTextValue, which only walks ContentText blocks.
+func firstToolResultText(blocks []protocol.ContentBlock) string {
+	for _, b := range blocks {
+		if b.Type == protocol.ContentToolResult && b.Text != "" {
+			return b.Text
+		}
+	}
+	return ""
 }
 
 // isEmptyTextParts reports whether parts is empty or contains only text blocks
