@@ -553,6 +553,16 @@ func TestAnthropicMessageImageBlockRoutesByMediaType(t *testing.T) {
 			wantType: "image",
 			wantURL:  "https://example.com/cat.png",
 		},
+		{
+			// Anthropic's URL source shape is {type:"url", url:"..."} with no
+			// media_type — for both image and document blocks. The routing to
+			// `document` must still happen based on block.MediaType even when
+			// the payload comes in via URL rather than base64.
+			name:     "pdf url routes to document block with url source",
+			block:    protocol.ContentBlock{Type: protocol.ContentImage, MediaType: "application/pdf", URL: "https://example.com/doc.pdf"},
+			wantType: "document",
+			wantURL:  "https://example.com/doc.pdf",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -571,6 +581,11 @@ func TestAnthropicMessageImageBlockRoutesByMediaType(t *testing.T) {
 			if tt.wantURL != "" {
 				if source["type"] != "url" || source["url"] != tt.wantURL {
 					t.Fatalf("expected url source %q, got %+v", tt.wantURL, source)
+				}
+				// Anthropic URL sources must not carry media_type — the
+				// presence of one is a spec violation upstream rejects.
+				if _, has := source["media_type"]; has {
+					t.Fatalf("url source should not carry media_type, got %+v", source)
 				}
 				return
 			}
