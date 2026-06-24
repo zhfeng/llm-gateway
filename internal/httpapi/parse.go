@@ -233,6 +233,13 @@ func parseAnthropicContent(raw json.RawMessage) []protocol.ContentBlock {
 						// text + inline images) verbatim so downstream emitters can
 						// forward it without flattening to a plain string.
 						block.Content = append(json.RawMessage(nil), trimmed...)
+					default:
+						// JSON primitive (null/true/false/number). Out of spec for
+						// Anthropic tool_result.content, but the previous
+						// contentToString path stringified the JSON literal rather
+						// than dropping it; mirror that so upstream still sees a
+						// well-formed string payload instead of an empty content.
+						block.Text = string(trimmed)
 					}
 				}
 				blocks = append(blocks, block)

@@ -69,3 +69,38 @@ func TestParseAnthropicContentToolResultErrorFlag(t *testing.T) {
 		t.Fatalf("unexpected block: %+v", blocks[0])
 	}
 }
+
+func TestParseAnthropicContentToolResultPrimitivePreserved(t *testing.T) {
+	// JSON primitives are out of spec for Anthropic tool_result.content,
+	// but the pre-refactor behaviour stringified them via contentToString.
+	// Make sure we keep that fallback instead of silently dropping the value.
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"null", "null", "null"},
+		{"true", "true", "true"},
+		{"false", "false", "false"},
+		{"number", "42", "42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := json.RawMessage(`[{"type":"tool_result","tool_use_id":"call_p","content":` + tc.in + `}]`)
+			blocks := parseAnthropicContent(raw)
+			if len(blocks) != 1 {
+				t.Fatalf("want 1 block, got %d", len(blocks))
+			}
+			b := blocks[0]
+			if b.Type != protocol.ContentToolResult || b.ToolUseID != "call_p" {
+				t.Fatalf("unexpected block: %+v", b)
+			}
+			if b.Text != tc.want {
+				t.Fatalf("text = %q, want %q", b.Text, tc.want)
+			}
+			if len(b.Content) != 0 {
+				t.Fatalf("expected empty Content for primitive, got %s", b.Content)
+			}
+		})
+	}
+}
