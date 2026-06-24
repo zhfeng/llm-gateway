@@ -260,7 +260,13 @@ func toAnthropicRequest(req *protocol.Request, streaming bool) anthropicRequest 
 func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 	role := msg.Role
 	if role == protocol.RoleTool {
-		return anthropicMessage{Role: protocol.RoleUser, Content: []anthropicContentPart{{Type: "tool_result", ToolUseID: msg.ToolCallID, Content: protocol.ContentTextValue(msg.Content)}}}
+		part := anthropicContentPart{Type: "tool_result", ToolUseID: msg.ToolCallID}
+		if raw := firstToolResultRawContent(msg.Content); len(raw) > 0 {
+			part.Content = raw
+		} else {
+			part.Content = protocol.ContentTextValue(msg.Content)
+		}
+		return anthropicMessage{Role: protocol.RoleUser, Content: []anthropicContentPart{part}}
 	}
 	parts := make([]anthropicContentPart, 0, len(msg.Content)+len(msg.ToolCalls))
 	for _, block := range msg.Content {
@@ -274,7 +280,15 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 			}
 			parts = append(parts, anthropicContentPart{Type: "image", Source: source})
 		case protocol.ContentToolResult:
-			parts = append(parts, anthropicContentPart{Type: "tool_result", ToolUseID: block.ToolUseID, Content: block.Text, IsError: block.IsError})
+			part := anthropicContentPart{Type: "tool_result", ToolUseID: block.ToolUseID, IsError: block.IsError}
+			if len(block.Content) > 0 {
+				// Forward the structured payload (array of text/image blocks)
+				// untouched so multi-block tool_results survive the round-trip.
+				part.Content = block.Content
+			} else {
+				part.Content = block.Text
+			}
+			parts = append(parts, part)
 		case protocol.ContentToolUse:
 			parts = append(parts, anthropicContentPart{Type: "tool_use", ID: block.ID, Name: block.Name, Input: block.Input})
 		}
@@ -290,6 +304,20 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 		parts = []anthropicContentPart{{Type: "text", Text: "..."}}
 	}
 	return anthropicMessage{Role: role, Content: parts}
+}
+
+// firstToolResultRawContent returns the raw structured payload of the first
+// tool_result content block, if any. Used by the RoleTool fast path so that
+// a tool-result message whose .Content was parsed from a structured Anthropic
+// payload (array of text/image blocks) is forwarded verbatim instead of
+// being flattened to a string.
+func firstToolResultRawContent(blocks []protocol.ContentBlock) json.RawMessage {
+	for _, b := range blocks {
+		if b.Type == protocol.ContentToolResult && len(b.Content) > 0 {
+			return b.Content
+		}
+	}
+	return nil
 }
 
 // isEmptyTextParts reports whether parts is empty or contains only text blocks

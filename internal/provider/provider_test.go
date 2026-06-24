@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -259,6 +260,99 @@ func TestAnthropicMessageConvertsToolRoleToToolResult(t *testing.T) {
 	part := msg.Content[0]
 	if part.Type != "tool_result" || part.ToolUseID != "call_1" || part.Content != "result" {
 		t.Fatalf("unexpected tool result: %+v", part)
+	}
+}
+
+func TestAnthropicMessageToolResultBlockPreservesStringContent(t *testing.T) {
+	msg := toAnthropicMessage(protocol.Message{
+		Role: protocol.RoleUser,
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_1",
+			Text:      "plain string result",
+		}},
+	})
+	if len(msg.Content) != 1 {
+		t.Fatalf("unexpected content len: %+v", msg.Content)
+	}
+	part := msg.Content[0]
+	if part.Type != "tool_result" || part.ToolUseID != "call_1" {
+		t.Fatalf("unexpected tool result header: %+v", part)
+	}
+	if s, ok := part.Content.(string); !ok || s != "plain string result" {
+		t.Fatalf("expected string content, got %T %v", part.Content, part.Content)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"content":"plain string result"`)) {
+		t.Fatalf("expected string content in JSON, got %s", out)
+	}
+}
+
+func TestAnthropicMessageToolResultBlockPreservesArrayContent(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"text","text":"hello"},{"type":"text","text":"world"}]`)
+	msg := toAnthropicMessage(protocol.Message{
+		Role: protocol.RoleUser,
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_1",
+			Content:   raw,
+		}},
+	})
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	expected := `"content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]`
+	if !bytes.Contains(out, []byte(expected)) {
+		t.Fatalf("expected array content preserved, got %s", out)
+	}
+}
+
+func TestAnthropicMessageToolResultBlockPreservesMixedImageContent(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"see image"}]`)
+	msg := toAnthropicMessage(protocol.Message{
+		Role: protocol.RoleUser,
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_2",
+			Content:   raw,
+		}},
+	})
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"media_type":"image/png"`)) || !bytes.Contains(out, []byte(`"data":"AAAA"`)) {
+		t.Fatalf("expected image source preserved, got %s", out)
+	}
+	if !bytes.Contains(out, []byte(`"text":"see image"`)) {
+		t.Fatalf("expected text block preserved, got %s", out)
+	}
+}
+
+func TestAnthropicMessageRoleToolPreservesStructuredContent(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"text","text":"structured"}]`)
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_3",
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_3",
+			Content:   raw,
+		}},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"content":[{"type":"text","text":"structured"}]`)) {
+		t.Fatalf("expected structured content preserved in RoleTool path, got %s", out)
 	}
 }
 

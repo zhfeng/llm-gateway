@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -213,13 +214,28 @@ func parseAnthropicContent(raw json.RawMessage) []protocol.ContentBlock {
 			}
 		case "tool_result":
 			var p struct {
-				ToolUseID string `json:"tool_use_id"`
-				Content   any    `json:"content"`
-				IsError   bool   `json:"is_error"`
+				ToolUseID string          `json:"tool_use_id"`
+				Content   json.RawMessage `json:"content"`
+				IsError   bool            `json:"is_error"`
 			}
 			if json.Unmarshal(part, &p) == nil {
-				text := contentToString(p.Content)
-				blocks = append(blocks, protocol.ContentBlock{Type: protocol.ContentToolResult, Text: text, ToolUseID: p.ToolUseID, IsError: p.IsError})
+				block := protocol.ContentBlock{Type: protocol.ContentToolResult, ToolUseID: p.ToolUseID, IsError: p.IsError}
+				trimmed := bytes.TrimSpace(p.Content)
+				if len(trimmed) > 0 {
+					switch trimmed[0] {
+					case '"':
+						var s string
+						if json.Unmarshal(trimmed, &s) == nil {
+							block.Text = s
+						}
+					case '[', '{':
+						// Preserve structured tool_result payload (e.g. multi-block
+						// text + inline images) verbatim so downstream emitters can
+						// forward it without flattening to a plain string.
+						block.Content = append(json.RawMessage(nil), trimmed...)
+					}
+				}
+				blocks = append(blocks, block)
 			}
 		}
 	}
