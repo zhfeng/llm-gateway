@@ -274,8 +274,12 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 			}
 			// Anthropic rejects PDFs inside an `image` block — they must be
 			// routed to a `document` block. Mirrors new-api's
-			// relay-claude.go:397-401. The response path remains image-only
-			// for now; sub-item 1.6 in #10 only covers the request path.
+			// relay-claude.go:397-401. The response transform
+			// (fromAnthropicResponse) doesn't currently round-trip binary
+			// content at all — it only maps `text` and `tool_use` parts and
+			// drops `image`/`document` blocks. Sub-item 1.6 in #10 only
+			// covers the request path; response-side handling is out of
+			// scope here.
 			partType := "image"
 			if block.MediaType == "application/pdf" {
 				partType = "document"
