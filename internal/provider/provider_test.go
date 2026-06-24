@@ -400,3 +400,113 @@ func TestAnthropicMessageAssistantWithToolCallsPreservesToolUse(t *testing.T) {
 		t.Fatalf("unexpected tool_use block: %+v", msg.Content[0])
 	}
 }
+
+func TestAnthropicRequestPrependsSyntheticUserWhenFirstMessageIsAssistant(t *testing.T) {
+	tests := []struct {
+		name     string
+		req      *protocol.Request
+		wantLen  int
+		wantRole []string
+	}{
+		{
+			name: "first non-system message is assistant",
+			req: &protocol.Request{
+				ProviderModel: "provider-model",
+				Messages: []protocol.Message{
+					{Role: protocol.RoleAssistant, Content: protocol.TextContent("seed prefill")},
+					{Role: protocol.RoleUser, Content: protocol.TextContent("hi")},
+				},
+			},
+			wantLen:  3,
+			wantRole: []string{protocol.RoleUser, protocol.RoleAssistant, protocol.RoleUser},
+		},
+		{
+			name: "system message followed by assistant first",
+			req: &protocol.Request{
+				ProviderModel: "provider-model",
+				Messages: []protocol.Message{
+					{Role: protocol.RoleSystem, Content: protocol.TextContent("you are helpful")},
+					{Role: protocol.RoleAssistant, Content: protocol.TextContent("seed prefill")},
+					{Role: protocol.RoleUser, Content: protocol.TextContent("hi")},
+				},
+			},
+			wantLen:  3,
+			wantRole: []string{protocol.RoleUser, protocol.RoleAssistant, protocol.RoleUser},
+		},
+		{
+			name: "single assistant message",
+			req: &protocol.Request{
+				ProviderModel: "provider-model",
+				Messages: []protocol.Message{
+					{Role: protocol.RoleAssistant, Content: protocol.TextContent("alone")},
+				},
+			},
+			wantLen:  2,
+			wantRole: []string{protocol.RoleUser, protocol.RoleAssistant},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := toAnthropicRequest(tt.req, false)
+			if len(payload.Messages) != tt.wantLen {
+				t.Fatalf("len = %d, want %d; messages = %+v", len(payload.Messages), tt.wantLen, payload.Messages)
+			}
+			for i, role := range tt.wantRole {
+				if payload.Messages[i].Role != role {
+					t.Fatalf("messages[%d].Role = %q, want %q", i, payload.Messages[i].Role, role)
+				}
+			}
+			first := payload.Messages[0]
+			if len(first.Content) != 1 || first.Content[0].Type != "text" || first.Content[0].Text != "..." {
+				t.Fatalf("synthetic first message = %+v, want single text \"...\" block", first.Content)
+			}
+		})
+	}
+}
+
+func TestAnthropicRequestLeavesFirstUserMessageUntouched(t *testing.T) {
+	req := &protocol.Request{
+		ProviderModel: "provider-model",
+		Messages: []protocol.Message{
+			{Role: protocol.RoleUser, Content: protocol.TextContent("hello")},
+			{Role: protocol.RoleAssistant, Content: protocol.TextContent("hi there")},
+		},
+	}
+	payload := toAnthropicRequest(req, false)
+	if len(payload.Messages) != 2 {
+		t.Fatalf("expected 2 messages unchanged, got %d: %+v", len(payload.Messages), payload.Messages)
+	}
+	if payload.Messages[0].Role != protocol.RoleUser || payload.Messages[1].Role != protocol.RoleAssistant {
+		t.Fatalf("unexpected roles: %+v", payload.Messages)
+	}
+	if got := payload.Messages[0].Content[0].Text; got != "hello" {
+		t.Fatalf("first user message mutated: text = %q", got)
+	}
+}
+
+func TestAnthropicRequestEmptyMessagesUnchanged(t *testing.T) {
+	req := &protocol.Request{
+		ProviderModel: "provider-model",
+		Messages:      []protocol.Message{},
+	}
+	payload := toAnthropicRequest(req, false)
+	if len(payload.Messages) != 0 {
+		t.Fatalf("expected empty messages slice unchanged, got %d: %+v", len(payload.Messages), payload.Messages)
+	}
+}
+
+func TestAnthropicRequestSystemOnlyMessagesUnchanged(t *testing.T) {
+	req := &protocol.Request{
+		ProviderModel: "provider-model",
+		Messages: []protocol.Message{
+			{Role: protocol.RoleSystem, Content: protocol.TextContent("you are helpful")},
+		},
+	}
+	payload := toAnthropicRequest(req, false)
+	if payload.System != "you are helpful" {
+		t.Fatalf("system = %q, want \"you are helpful\"", payload.System)
+	}
+	if len(payload.Messages) != 0 {
+		t.Fatalf("expected empty messages slice (no synthetic injection on system-only), got %d: %+v", len(payload.Messages), payload.Messages)
+	}
+}
