@@ -510,3 +510,79 @@ func TestAnthropicRequestSystemOnlyMessagesUnchanged(t *testing.T) {
 		t.Fatalf("expected empty messages slice (no synthetic injection on system-only), got %d: %+v", len(payload.Messages), payload.Messages)
 	}
 }
+
+func TestAnthropicMessageImageBlockRoutesByMediaType(t *testing.T) {
+	tests := []struct {
+		name      string
+		block     protocol.ContentBlock
+		wantType  string
+		wantMedia string
+		wantData  string
+		wantURL   string
+	}{
+		{
+			name:      "pdf media type routes to document block",
+			block:     protocol.ContentBlock{Type: protocol.ContentImage, MediaType: "application/pdf", Data: "JVBERi0xLjQK"},
+			wantType:  "document",
+			wantMedia: "application/pdf",
+			wantData:  "JVBERi0xLjQK",
+		},
+		{
+			name:      "png media type stays an image block",
+			block:     protocol.ContentBlock{Type: protocol.ContentImage, MediaType: "image/png", Data: "iVBORw0KGgo="},
+			wantType:  "image",
+			wantMedia: "image/png",
+			wantData:  "iVBORw0KGgo=",
+		},
+		{
+			name:      "jpeg media type stays an image block",
+			block:     protocol.ContentBlock{Type: protocol.ContentImage, MediaType: "image/jpeg", Data: "/9j/4AAQSkZJRg=="},
+			wantType:  "image",
+			wantMedia: "image/jpeg",
+			wantData:  "/9j/4AAQSkZJRg==",
+		},
+		{
+			name:     "empty media type defaults to image block",
+			block:    protocol.ContentBlock{Type: protocol.ContentImage, Data: "abc"},
+			wantType: "image",
+			wantData: "abc",
+		},
+		{
+			name:     "image url falls through to url source as image",
+			block:    protocol.ContentBlock{Type: protocol.ContentImage, URL: "https://example.com/cat.png"},
+			wantType: "image",
+			wantURL:  "https://example.com/cat.png",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := toAnthropicMessage(protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentBlock{tt.block}})
+			if len(msg.Content) != 1 {
+				t.Fatalf("expected 1 content part, got %d: %+v", len(msg.Content), msg.Content)
+			}
+			part := msg.Content[0]
+			if part.Type != tt.wantType {
+				t.Fatalf("part type = %q, want %q", part.Type, tt.wantType)
+			}
+			source, ok := part.Source.(map[string]any)
+			if !ok {
+				t.Fatalf("source is not a map: %T %+v", part.Source, part.Source)
+			}
+			if tt.wantURL != "" {
+				if source["type"] != "url" || source["url"] != tt.wantURL {
+					t.Fatalf("expected url source %q, got %+v", tt.wantURL, source)
+				}
+				return
+			}
+			if source["type"] != "base64" {
+				t.Fatalf("expected base64 source, got %+v", source)
+			}
+			if source["media_type"] != tt.wantMedia {
+				t.Fatalf("media_type = %v, want %q", source["media_type"], tt.wantMedia)
+			}
+			if source["data"] != tt.wantData {
+				t.Fatalf("data = %v, want %q", source["data"], tt.wantData)
+			}
+		})
+	}
+}
