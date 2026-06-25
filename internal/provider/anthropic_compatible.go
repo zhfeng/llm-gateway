@@ -261,13 +261,21 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 	role := msg.Role
 	if role == protocol.RoleTool {
 		part := anthropicContentPart{Type: "tool_result", ToolUseID: msg.ToolCallID}
-		if raw := firstToolResultRawContent(msg.Content); len(raw) > 0 {
-			part.Content = raw
-		} else if text := firstToolResultText(msg.Content); text != "" {
-			// Tool-result block carrying only plain text (no structured payload):
-			// forward that text directly so it isn't dropped by ContentTextValue,
-			// which only concatenates ContentText blocks.
-			part.Content = text
+		if selected := selectToolResultBlock(msg.Content, msg.ToolCallID); selected != nil {
+			// Propagate is_error from the selected block so error tool_results
+			// aren't silently downgraded into successful ones on the wire.
+			part.IsError = selected.IsError
+			switch {
+			case len(selected.Content) > 0:
+				part.Content = selected.Content
+			case selected.Text != "":
+				// Tool-result block carrying only plain text (no structured
+				// payload): forward that text directly so it isn't dropped by
+				// ContentTextValue, which only concatenates ContentText blocks.
+				part.Content = selected.Text
+			default:
+				part.Content = protocol.ContentTextValue(msg.Content)
+			}
 		} else {
 			part.Content = protocol.ContentTextValue(msg.Content)
 		}
@@ -311,32 +319,29 @@ func toAnthropicMessage(msg protocol.Message) anthropicMessage {
 	return anthropicMessage{Role: role, Content: parts}
 }
 
-// firstToolResultRawContent returns the raw structured payload of the first
-// tool_result content block, if any. Used by the RoleTool fast path so that
-// a tool-result message whose .Content was parsed from a structured Anthropic
-// payload (array of text/image blocks) is forwarded verbatim instead of
-// being flattened to a string.
-func firstToolResultRawContent(blocks []protocol.ContentBlock) json.RawMessage {
-	for _, b := range blocks {
-		if b.Type == protocol.ContentToolResult && len(b.Content) > 0 {
-			return b.Content
+// selectToolResultBlock returns the tool_result content block that should
+// drive the RoleTool fast path. When the message carries multiple tool_result
+// blocks (e.g. a model that batched several tool calls) we prefer the one
+// whose ToolUseID matches the message's ToolCallID so the right payload is
+// associated with the right call. If no block matches — or toolCallID is
+// empty — fall back to the first tool_result block so single-result messages
+// keep working. Returns nil if msg.Content has no tool_result blocks at all,
+// in which case the caller falls back to ContentTextValue.
+func selectToolResultBlock(blocks []protocol.ContentBlock, toolCallID string) *protocol.ContentBlock {
+	var first *protocol.ContentBlock
+	for i := range blocks {
+		b := &blocks[i]
+		if b.Type != protocol.ContentToolResult {
+			continue
+		}
+		if first == nil {
+			first = b
+		}
+		if toolCallID != "" && b.ToolUseID == toolCallID {
+			return b
 		}
 	}
-	return nil
-}
-
-// firstToolResultText returns the Text of the first tool_result block that
-// carries plain text (no structured Content). This is the RoleTool fallback
-// after firstToolResultRawContent: tool-role messages whose Content is a
-// single tool_result ContentBlock with Text would otherwise be dropped by
-// ContentTextValue, which only walks ContentText blocks.
-func firstToolResultText(blocks []protocol.ContentBlock) string {
-	for _, b := range blocks {
-		if b.Type == protocol.ContentToolResult && b.Text != "" {
-			return b.Text
-		}
-	}
-	return ""
+	return first
 }
 
 // isEmptyTextParts reports whether parts is empty or contains only text blocks

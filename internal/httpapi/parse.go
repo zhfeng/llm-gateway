@@ -231,8 +231,12 @@ func parseAnthropicContent(raw json.RawMessage) []protocol.ContentBlock {
 					case '[', '{':
 						// Preserve structured tool_result payload (e.g. multi-block
 						// text + inline images) verbatim so downstream emitters can
-						// forward it without flattening to a plain string.
-						block.Content = append(json.RawMessage(nil), trimmed...)
+						// forward it without flattening to a plain string. trimmed
+						// already aliases the json.RawMessage buffer owned by the
+						// outer Unmarshal, so no extra copy is needed — base64
+						// screenshot payloads can be large and copying doubles
+						// memory.
+						block.Content = trimmed
 					default:
 						// JSON primitive (null/true/false/number). Out of spec for
 						// Anthropic tool_result.content, but the previous

@@ -390,6 +390,61 @@ func TestAnthropicMessageRoleToolPreservesToolResultText(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessageRoleToolSelectsBlockByToolCallID(t *testing.T) {
+	// A RoleTool message may carry multiple tool_result blocks (a model that
+	// batched several tool calls into one turn). The fast path must pick the
+	// block whose ToolUseID matches msg.ToolCallID, not just the first one,
+	// otherwise the wrong payload gets stamped with the wrong ID.
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_b",
+		Content: []protocol.ContentBlock{
+			{Type: protocol.ContentToolResult, ToolUseID: "call_a", Text: "first result"},
+			{Type: protocol.ContentToolResult, ToolUseID: "call_b", Text: "second result"},
+		},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	part := msg.Content[0]
+	if part.ToolUseID != "call_b" {
+		t.Fatalf("expected tool_use_id call_b, got %q", part.ToolUseID)
+	}
+	if s, ok := part.Content.(string); !ok || s != "second result" {
+		t.Fatalf("expected content from matching block, got %T %v", part.Content, part.Content)
+	}
+}
+
+func TestAnthropicMessageRoleToolPropagatesIsError(t *testing.T) {
+	// A tool_result with is_error:true must keep that flag through the
+	// RoleTool fast path; otherwise an upstream tool failure is silently
+	// presented to the model as a successful result.
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_err",
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_err",
+			Text:      "boom",
+			IsError:   true,
+		}},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	part := msg.Content[0]
+	if !part.IsError {
+		t.Fatalf("expected IsError to be propagated, got %+v", part)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"is_error":true`)) {
+		t.Fatalf("expected is_error:true in JSON, got %s", out)
+	}
+}
+
 func TestOpenAIStreamOptionsOnlyForStreaming(t *testing.T) {
 	req := &protocol.Request{ProviderModel: "provider-model", Messages: []protocol.Message{{Role: protocol.RoleUser, Content: protocol.TextContent("hi")}}}
 	nonStreaming, err := json.Marshal(toOpenAIRequest(req, false))
