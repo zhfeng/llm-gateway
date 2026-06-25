@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -213,13 +214,39 @@ func parseAnthropicContent(raw json.RawMessage) []protocol.ContentBlock {
 			}
 		case "tool_result":
 			var p struct {
-				ToolUseID string `json:"tool_use_id"`
-				Content   any    `json:"content"`
-				IsError   bool   `json:"is_error"`
+				ToolUseID string          `json:"tool_use_id"`
+				Content   json.RawMessage `json:"content"`
+				IsError   bool            `json:"is_error"`
 			}
 			if json.Unmarshal(part, &p) == nil {
-				text := contentToString(p.Content)
-				blocks = append(blocks, protocol.ContentBlock{Type: protocol.ContentToolResult, Text: text, ToolUseID: p.ToolUseID, IsError: p.IsError})
+				block := protocol.ContentBlock{Type: protocol.ContentToolResult, ToolUseID: p.ToolUseID, IsError: p.IsError}
+				trimmed := bytes.TrimSpace(p.Content)
+				if len(trimmed) > 0 {
+					switch trimmed[0] {
+					case '"':
+						var s string
+						if json.Unmarshal(trimmed, &s) == nil {
+							block.Text = s
+						}
+					case '[', '{':
+						// Preserve structured tool_result payload (e.g. multi-block
+						// text + inline images) verbatim so downstream emitters can
+						// forward it without flattening to a plain string. trimmed
+						// already aliases the json.RawMessage buffer owned by the
+						// outer Unmarshal, so no extra copy is needed — base64
+						// screenshot payloads can be large and copying doubles
+						// memory.
+						block.Content = trimmed
+					default:
+						// JSON primitive (null/true/false/number). Out of spec for
+						// Anthropic tool_result.content, but the previous
+						// contentToString path stringified the JSON literal rather
+						// than dropping it; mirror that so upstream still sees a
+						// well-formed string payload instead of an empty content.
+						block.Text = string(trimmed)
+					}
+				}
+				blocks = append(blocks, block)
 			}
 		}
 	}

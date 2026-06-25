@@ -60,6 +60,11 @@ type ContentBlock struct {
 	Input     json.RawMessage
 	ToolUseID string
 	IsError   bool
+	// Content preserves the raw structured payload of a tool_result block
+	// when the upstream client sent it as an array (e.g. multi-block text
+	// plus inline images). When non-empty, downstream emitters should write
+	// this verbatim instead of falling back to the flattened Text string.
+	Content json.RawMessage
 }
 
 type Tool struct {

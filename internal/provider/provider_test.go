@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -259,6 +260,188 @@ func TestAnthropicMessageConvertsToolRoleToToolResult(t *testing.T) {
 	part := msg.Content[0]
 	if part.Type != "tool_result" || part.ToolUseID != "call_1" || part.Content != "result" {
 		t.Fatalf("unexpected tool result: %+v", part)
+	}
+}
+
+func TestAnthropicMessageToolResultBlockPreservesStringContent(t *testing.T) {
+	msg := toAnthropicMessage(protocol.Message{
+		Role: protocol.RoleUser,
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_1",
+			Text:      "plain string result",
+		}},
+	})
+	if len(msg.Content) != 1 {
+		t.Fatalf("unexpected content len: %+v", msg.Content)
+	}
+	part := msg.Content[0]
+	if part.Type != "tool_result" || part.ToolUseID != "call_1" {
+		t.Fatalf("unexpected tool result header: %+v", part)
+	}
+	if s, ok := part.Content.(string); !ok || s != "plain string result" {
+		t.Fatalf("expected string content, got %T %v", part.Content, part.Content)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"content":"plain string result"`)) {
+		t.Fatalf("expected string content in JSON, got %s", out)
+	}
+}
+
+func TestAnthropicMessageToolResultBlockPreservesArrayContent(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"text","text":"hello"},{"type":"text","text":"world"}]`)
+	msg := toAnthropicMessage(protocol.Message{
+		Role: protocol.RoleUser,
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_1",
+			Content:   raw,
+		}},
+	})
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	expected := `"content":[{"type":"text","text":"hello"},{"type":"text","text":"world"}]`
+	if !bytes.Contains(out, []byte(expected)) {
+		t.Fatalf("expected array content preserved, got %s", out)
+	}
+}
+
+func TestAnthropicMessageToolResultBlockPreservesMixedImageContent(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"see image"}]`)
+	msg := toAnthropicMessage(protocol.Message{
+		Role: protocol.RoleUser,
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_2",
+			Content:   raw,
+		}},
+	})
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"media_type":"image/png"`)) || !bytes.Contains(out, []byte(`"data":"AAAA"`)) {
+		t.Fatalf("expected image source preserved, got %s", out)
+	}
+	if !bytes.Contains(out, []byte(`"text":"see image"`)) {
+		t.Fatalf("expected text block preserved, got %s", out)
+	}
+}
+
+func TestAnthropicMessageRoleToolPreservesStructuredContent(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"text","text":"structured"}]`)
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_3",
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_3",
+			Content:   raw,
+		}},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"content":[{"type":"text","text":"structured"}]`)) {
+		t.Fatalf("expected structured content preserved in RoleTool path, got %s", out)
+	}
+}
+
+func TestAnthropicMessageRoleToolPreservesToolResultText(t *testing.T) {
+	// A tool-role message whose Content is a tool_result ContentBlock carrying
+	// only Text (no structured Content) used to fall through to
+	// ContentTextValue, which only concatenates ContentText blocks and would
+	// therefore emit an empty tool_result. The dedicated fallback should
+	// surface the Text instead.
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_4",
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_4",
+			Text:      "tool said hi",
+		}},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	part := msg.Content[0]
+	if part.Type != "tool_result" || part.ToolUseID != "call_4" {
+		t.Fatalf("unexpected tool result header: %+v", part)
+	}
+	if s, ok := part.Content.(string); !ok || s != "tool said hi" {
+		t.Fatalf("expected tool_result.Text surfaced as string content, got %T %v", part.Content, part.Content)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"content":"tool said hi"`)) {
+		t.Fatalf("expected text content in JSON, got %s", out)
+	}
+}
+
+func TestAnthropicMessageRoleToolSelectsBlockByToolCallID(t *testing.T) {
+	// A RoleTool message may carry multiple tool_result blocks (a model that
+	// batched several tool calls into one turn). The fast path must pick the
+	// block whose ToolUseID matches msg.ToolCallID, not just the first one,
+	// otherwise the wrong payload gets stamped with the wrong ID.
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_b",
+		Content: []protocol.ContentBlock{
+			{Type: protocol.ContentToolResult, ToolUseID: "call_a", Text: "first result"},
+			{Type: protocol.ContentToolResult, ToolUseID: "call_b", Text: "second result"},
+		},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	part := msg.Content[0]
+	if part.ToolUseID != "call_b" {
+		t.Fatalf("expected tool_use_id call_b, got %q", part.ToolUseID)
+	}
+	if s, ok := part.Content.(string); !ok || s != "second result" {
+		t.Fatalf("expected content from matching block, got %T %v", part.Content, part.Content)
+	}
+}
+
+func TestAnthropicMessageRoleToolPropagatesIsError(t *testing.T) {
+	// A tool_result with is_error:true must keep that flag through the
+	// RoleTool fast path; otherwise an upstream tool failure is silently
+	// presented to the model as a successful result.
+	msg := toAnthropicMessage(protocol.Message{
+		Role:       protocol.RoleTool,
+		ToolCallID: "call_err",
+		Content: []protocol.ContentBlock{{
+			Type:      protocol.ContentToolResult,
+			ToolUseID: "call_err",
+			Text:      "boom",
+			IsError:   true,
+		}},
+	})
+	if msg.Role != protocol.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("unexpected message: %+v", msg)
+	}
+	part := msg.Content[0]
+	if !part.IsError {
+		t.Fatalf("expected IsError to be propagated, got %+v", part)
+	}
+	out, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"is_error":true`)) {
+		t.Fatalf("expected is_error:true in JSON, got %s", out)
 	}
 }
 
