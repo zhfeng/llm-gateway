@@ -145,6 +145,7 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 						Type        string `json:"type"`
 						Text        string `json:"text"`
 						Thinking    string `json:"thinking"`
+						Signature   string `json:"signature"`
 						PartialJSON string `json:"partial_json"`
 					} `json:"delta"`
 				}
@@ -159,6 +160,14 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 					}
 				case "thinking_delta":
 					if !send(protocol.StreamEvent{Type: protocol.StreamThinking, Text: payload.Delta.Thinking}) {
+						return ctx.Err()
+					}
+				case "signature_delta":
+					// The signature itself is an encrypted attestation and is
+					// not user-readable; we surface a newline so consumers
+					// receive a separator between thinking blocks (mirrors
+					// new-api's behavior for reasoning_content).
+					if !send(protocol.StreamEvent{Type: protocol.StreamThinking, Text: "\n"}) {
 						return ctx.Err()
 					}
 				case "input_json_delta":
