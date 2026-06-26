@@ -421,23 +421,32 @@ func (h *HandlerGroup) streamAnthropic(w http.ResponseWriter, r *http.Request, r
 	dstream.Flush(w)
 	blockStarted := false
 	blockType := ""
+	blockToolCallID := ""
+	blockIndex := 0
+	currentBlockIndex := -1
 	startBlock := func(kind string, event protocol.StreamEvent) {
 		if blockStarted {
 			return
 		}
 		blockStarted = true
 		blockType = kind
+		blockToolCallID = ""
+		currentBlockIndex = blockIndex
+		blockIndex++
 		contentBlock := map[string]any{"type": "text", "text": ""}
 		if kind == "tool_use" {
+			blockToolCallID = event.ToolCallID
 			contentBlock = map[string]any{"type": "tool_use", "id": event.ToolCallID, "name": event.ToolName, "input": map[string]any{}}
 		}
-		dstream.WriteEvent(w, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": contentBlock})
+		dstream.WriteEvent(w, "content_block_start", map[string]any{"type": "content_block_start", "index": currentBlockIndex, "content_block": contentBlock})
 	}
 	stopBlock := func() {
 		if blockStarted {
-			dstream.WriteEvent(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+			dstream.WriteEvent(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": currentBlockIndex})
 			blockStarted = false
 			blockType = ""
+			blockToolCallID = ""
+			currentBlockIndex = -1
 		}
 	}
 	for event := range events {
@@ -451,16 +460,16 @@ func (h *HandlerGroup) streamAnthropic(w http.ResponseWriter, r *http.Request, r
 				stopBlock()
 				startBlock("text", event)
 			}
-			dstream.WriteEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": event.Text}})
+			dstream.WriteEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": currentBlockIndex, "delta": map[string]any{"type": "text_delta", "text": event.Text}})
 			dstream.Flush(w)
 			continue
 		}
 		if event.Type == protocol.StreamToolCall && event.ToolInput != "" {
-			if blockType != "tool_use" {
+			if blockType != "tool_use" || blockToolCallID != event.ToolCallID {
 				stopBlock()
 				startBlock("tool_use", event)
 			}
-			dstream.WriteEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "input_json_delta", "partial_json": event.ToolInput}})
+			dstream.WriteEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": currentBlockIndex, "delta": map[string]any{"type": "input_json_delta", "partial_json": event.ToolInput}})
 			dstream.Flush(w)
 			continue
 		}
