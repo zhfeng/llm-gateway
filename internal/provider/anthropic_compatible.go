@@ -161,6 +161,14 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 					if !send(protocol.StreamEvent{Type: protocol.StreamThinking, Text: payload.Delta.Thinking}) {
 						return ctx.Err()
 					}
+				case "signature_delta":
+					// The signature itself is an encrypted attestation and is
+					// not user-readable; we surface a newline so consumers
+					// receive a separator between thinking blocks (mirrors
+					// new-api's behavior for reasoning_content).
+					if !send(protocol.StreamEvent{Type: protocol.StreamThinking, Text: "\n"}) {
+						return ctx.Err()
+					}
 				case "input_json_delta":
 					if currentTool != nil {
 						currentTool.Input = append(currentTool.Input, payload.Delta.PartialJSON...)

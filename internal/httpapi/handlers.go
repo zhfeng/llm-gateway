@@ -382,6 +382,11 @@ func (h *HandlerGroup) streamOpenAI(w http.ResponseWriter, r *http.Request, req 
 			dstream.Flush(w)
 			continue
 		}
+		if event.Type == protocol.StreamThinking && event.Text != "" {
+			dstream.WriteEvent(w, "", openAIReasoningDeltaChunk(req.Model, event.Text))
+			dstream.Flush(w)
+			continue
+		}
 		if event.Type == protocol.StreamToolCall && event.ToolInput != "" {
 			dstream.WriteEvent(w, "", openAIToolDeltaChunk(req.Model, event))
 			dstream.Flush(w)
@@ -548,6 +553,18 @@ func openAITextDeltaChunk(model, text string) map[string]any {
 		"choices": []any{map[string]any{
 			"index":         0,
 			"delta":         map[string]any{"content": text},
+			"finish_reason": nil,
+		}},
+	}
+}
+
+func openAIReasoningDeltaChunk(model, text string) map[string]any {
+	return map[string]any{
+		"object": "chat.completion.chunk",
+		"model":  model,
+		"choices": []any{map[string]any{
+			"index":         0,
+			"delta":         map[string]any{"reasoning_content": text},
 			"finish_reason": nil,
 		}},
 	}

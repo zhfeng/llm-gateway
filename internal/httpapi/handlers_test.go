@@ -125,6 +125,18 @@ func TestOpenAIToolDeltaChunkIncludesToolIndex(t *testing.T) {
 	}
 }
 
+func TestOpenAIReasoningDeltaChunkUsesReasoningContent(t *testing.T) {
+	chunk := openAIReasoningDeltaChunk("m", "abc")
+	choices := chunk["choices"].([]any)
+	delta := choices[0].(map[string]any)["delta"].(map[string]any)
+	if got := delta["reasoning_content"]; got != "abc" {
+		t.Fatalf("reasoning_content = %#v; want %q", got, "abc")
+	}
+	if _, ok := delta["content"]; ok {
+		t.Fatalf("reasoning chunk must not carry content field: %#v", delta)
+	}
+}
+
 func TestStickyHeaderRoutesRepeatedRequestsToSameTarget(t *testing.T) {
 	seen := []string{}
 	h := stickyTestHandler(&seen, true, "auth_key")
@@ -310,5 +322,33 @@ func TestAnthropicStreamIncludesLifecycleEvents(t *testing.T) {
 		if !strings.Contains(body, event) {
 			t.Fatalf("stream missing %s; body=%s", event, body)
 		}
+	}
+}
+
+func TestOpenAIStreamSurfacesThinkingAsReasoningContent(t *testing.T) {
+	prov := streamProvider{events: []protocol.StreamEvent{
+		{Type: protocol.StreamThinking, Text: "let me think"},
+		{Type: protocol.StreamTextDelta, Text: "hello"},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", Role: protocol.RoleAssistant, Content: protocol.TextContent("hello"), StopReason: protocol.StopEndTurn}},
+	}}
+	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
+	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.ChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"let me think"`) {
+		t.Fatalf("body missing reasoning_content delta: %s", body)
+	}
+	if !strings.Contains(body, `"content":"hello"`) {
+		t.Fatalf("body missing text delta: %s", body)
+	}
+	if !strings.Contains(body, "data: [DONE]") {
+		t.Fatalf("body missing terminator: %s", body)
 	}
 }
