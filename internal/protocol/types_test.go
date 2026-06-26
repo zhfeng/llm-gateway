@@ -3,25 +3,25 @@ package protocol
 import "testing"
 
 func TestMapAnthropicStopReasonRefusalPassesThrough(t *testing.T) {
-	// Anthropic clients must receive "refusal" verbatim — the OpenAI-only
+	// Anthropic clients must receive StopRefusal verbatim — the OpenAI-only
 	// remapping to "content_filter" lives in OpenAIStopReason.
-	if got := MapAnthropicStopReason("refusal"); got != "refusal" {
-		t.Fatalf("MapAnthropicStopReason(refusal) = %q; want %q", got, "refusal")
+	if got := MapAnthropicStopReason(StopRefusal); got != StopRefusal {
+		t.Fatalf("MapAnthropicStopReason(%q) = %q; want %q", StopRefusal, got, StopRefusal)
 	}
 }
 
 func TestOpenAIStopReasonRefusal(t *testing.T) {
-	if got := OpenAIStopReason("refusal"); got != "content_filter" {
-		t.Fatalf("OpenAIStopReason(refusal) = %q; want %q", got, "content_filter")
+	if got := OpenAIStopReason(StopRefusal); got != "content_filter" {
+		t.Fatalf("OpenAIStopReason(%q) = %q; want %q", StopRefusal, got, "content_filter")
 	}
 }
 
 func TestMapOpenAIStopReasonContentFilterMapsToRefusal(t *testing.T) {
 	// An OpenAI-compatible upstream returning finish_reason:"content_filter"
-	// must be normalized to the canonical Anthropic "refusal" so it doesn't
+	// must be normalized to the canonical Anthropic StopRefusal so it doesn't
 	// leak into Anthropic-compatible /v1/messages responses verbatim.
-	if got := MapOpenAIStopReason("content_filter"); got != "refusal" {
-		t.Fatalf("MapOpenAIStopReason(content_filter) = %q; want %q", got, "refusal")
+	if got := MapOpenAIStopReason("content_filter"); got != StopRefusal {
+		t.Fatalf("MapOpenAIStopReason(content_filter) = %q; want %q", got, StopRefusal)
 	}
 }
 
@@ -34,7 +34,7 @@ func TestAnthropicStopReasonsMapToOpenAI(t *testing.T) {
 		{anthropic: StopMaxTokens, openAI: "length"},
 		{anthropic: StopStopSeq, openAI: "stop"},
 		{anthropic: StopToolUse, openAI: "tool_calls"},
-		{anthropic: "refusal", openAI: "content_filter"},
+		{anthropic: StopRefusal, openAI: "content_filter"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.anthropic, func(t *testing.T) {

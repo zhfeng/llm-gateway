@@ -18,6 +18,7 @@ const (
 	StopToolUse   = "tool_use"
 	StopMaxTokens = "max_tokens"
 	StopStopSeq   = "stop_sequence"
+	StopRefusal   = "refusal"
 
 	StreamTextDelta    = "text_delta"
 	StreamThinking     = "thinking_delta"
@@ -144,7 +145,7 @@ func MapOpenAIStopReason(reason string) string {
 	case "content_filter":
 		// Canonical Anthropic form is "refusal"; the OpenAI-only
 		// "content_filter" token must not leak into Anthropic responses.
-		return "refusal"
+		return StopRefusal
 	default:
 		return reason
 	}
@@ -168,7 +169,7 @@ func OpenAIStopReason(reason string) string {
 		return "tool_calls"
 	case StopMaxTokens:
 		return "length"
-	case "refusal":
+	case StopRefusal:
 		return "content_filter"
 	default:
 		if reason == "" {
