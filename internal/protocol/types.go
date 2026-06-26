@@ -145,7 +145,12 @@ func MapOpenAIStopReason(reason string) string {
 }
 
 func MapAnthropicStopReason(reason string) string {
-	return reason
+	switch reason {
+	case "refusal":
+		return "content_filter"
+	default:
+		return reason
+	}
 }
 
 func OpenAIStopReason(reason string) string {
@@ -156,6 +161,8 @@ func OpenAIStopReason(reason string) string {
 		return "tool_calls"
 	case StopMaxTokens:
 		return "length"
+	case "content_filter":
+		return "content_filter"
 	default:
 		if reason == "" {
 			return "stop"

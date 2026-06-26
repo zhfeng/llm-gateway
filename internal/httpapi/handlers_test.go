@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,6 +113,75 @@ func TestMessagesOversizedBodyReturns413(t *testing.T) {
 
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusRequestEntityTooLarge, w.Body.String())
+	}
+}
+
+func TestOpenAICompletionMapsAnthropicRefusalToContentFilter(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":          "msg_refusal",
+			"model":       "provider-model",
+			"role":        "assistant",
+			"content":     []any{map[string]any{"type": "text", "text": "I can't help with that."}},
+			"stop_reason": "refusal",
+			"usage":       map[string]any{"input_tokens": 1, "output_tokens": 2},
+		})
+	}))
+	defer upstream.Close()
+
+	prov, err := provider.New(config.ProviderConfig{Name: "anthropic", Type: config.ProviderAnthropicCompatible, BaseURL: upstream.URL + "/v1"}, "key", nil, time.Second, config.TransportRuntime{}, config.ProviderHealthProbeRuntime{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "provider-model"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
+	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.ChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Choices) != 1 {
+		t.Fatalf("choices = %d; want 1", len(body.Choices))
+	}
+	if got := body.Choices[0].FinishReason; got != "content_filter" {
+		t.Fatalf("finish_reason = %q; want %q", got, "content_filter")
+	}
+}
+
+func TestOpenAIStreamMapsAnthropicRefusalToContentFilter(t *testing.T) {
+	prov := streamProvider{events: []protocol.StreamEvent{
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", Role: protocol.RoleAssistant, StopReason: "content_filter"}},
+	}}
+	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
+	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.ChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"finish_reason":"content_filter"`) {
+		t.Fatalf("body missing content_filter finish_reason: %s", body)
+	}
+	if strings.Contains(body, `"finish_reason":"refusal"`) {
+		t.Fatalf("body contains unmapped refusal finish_reason: %s", body)
 	}
 }
 
