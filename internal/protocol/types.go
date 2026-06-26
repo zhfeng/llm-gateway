@@ -18,6 +18,7 @@ const (
 	StopToolUse   = "tool_use"
 	StopMaxTokens = "max_tokens"
 	StopStopSeq   = "stop_sequence"
+	StopRefusal   = "refusal"
 
 	StreamTextDelta    = "text_delta"
 	StreamThinking     = "thinking_delta"
@@ -131,6 +132,10 @@ func ContentTextValue(blocks []ContentBlock) string {
 	return out
 }
 
+// MapOpenAIStopReason normalizes a finish_reason coming from an
+// OpenAI-compatible upstream into the canonical Anthropic-compatible stop
+// reason used internally (and emitted verbatim by writeAnthropicMessage).
+// The reverse OpenAI-facing translation lives in OpenAIStopReason.
 func MapOpenAIStopReason(reason string) string {
 	switch reason {
 	case "stop":
@@ -140,12 +145,20 @@ func MapOpenAIStopReason(reason string) string {
 	case "length":
 		return StopMaxTokens
 	case "content_filter":
-		return "content_filter"
+		// Canonical Anthropic form is "refusal"; the OpenAI-only
+		// "content_filter" token must not leak into Anthropic responses.
+		return StopRefusal
 	default:
 		return reason
 	}
 }
 
+// MapAnthropicStopReason normalizes a stop_reason coming from an Anthropic
+// upstream into the canonical Anthropic-compatible form. Anthropic's own
+// SDKs/clients consume this value verbatim through the
+// Anthropic-compatible /v1/messages response, so any OpenAI-specific
+// remapping (e.g. "refusal" -> "content_filter") must NOT happen here —
+// that translation belongs in OpenAIStopReason.
 func MapAnthropicStopReason(reason string) string {
 	return reason
 }
@@ -158,6 +171,8 @@ func OpenAIStopReason(reason string) string {
 		return "tool_calls"
 	case StopMaxTokens:
 		return "length"
+	case StopRefusal:
+		return "content_filter"
 	default:
 		if reason == "" {
 			return "stop"
