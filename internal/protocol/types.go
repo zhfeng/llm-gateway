@@ -90,10 +90,12 @@ type Response struct {
 }
 
 type Usage struct {
-	InputTokens              int `json:"input_tokens,omitempty"`
-	OutputTokens             int `json:"output_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	InputTokens                int `json:"input_tokens,omitempty"`
+	OutputTokens               int `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens   int `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreation5mInputTokens int `json:"cache_creation_5m_input_tokens,omitempty"`
+	CacheCreation1hInputTokens int `json:"cache_creation_1h_input_tokens,omitempty"`
+	CacheReadInputTokens       int `json:"cache_read_input_tokens,omitempty"`
 }
 
 type StreamEvent struct {

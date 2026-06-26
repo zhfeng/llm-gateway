@@ -402,6 +402,63 @@ func TestOpenAIStreamSurfacesThinkingAsReasoningContent(t *testing.T) {
 	}
 }
 
+func TestAddCacheUsageFieldsSplit(t *testing.T) {
+	usage := map[string]any{}
+	addCacheUsageFields(usage, protocol.Usage{
+		CacheCreationInputTokens:   10,
+		CacheCreation5mInputTokens: 7,
+		CacheCreation1hInputTokens: 3,
+		CacheReadInputTokens:       4,
+	})
+	if usage["cache_creation_input_tokens"] != 10 {
+		t.Fatalf("flat aggregate missing: %#v", usage["cache_creation_input_tokens"])
+	}
+	if usage["cache_read_input_tokens"] != 4 {
+		t.Fatalf("cache_read missing: %#v", usage["cache_read_input_tokens"])
+	}
+	cc, ok := usage["cache_creation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested cache_creation map, got %#v", usage["cache_creation"])
+	}
+	if cc["ephemeral_5m_input_tokens"] != 7 {
+		t.Fatalf("ephemeral_5m: %#v", cc["ephemeral_5m_input_tokens"])
+	}
+	if cc["ephemeral_1h_input_tokens"] != 3 {
+		t.Fatalf("ephemeral_1h: %#v", cc["ephemeral_1h_input_tokens"])
+	}
+}
+
+func TestAddCacheUsageFieldsAggregateOnly(t *testing.T) {
+	usage := map[string]any{}
+	addCacheUsageFields(usage, protocol.Usage{
+		CacheCreationInputTokens: 9,
+		CacheReadInputTokens:     2,
+	})
+	if usage["cache_creation_input_tokens"] != 9 {
+		t.Fatalf("flat aggregate missing: %#v", usage["cache_creation_input_tokens"])
+	}
+	if usage["cache_read_input_tokens"] != 2 {
+		t.Fatalf("cache_read missing: %#v", usage["cache_read_input_tokens"])
+	}
+	if _, ok := usage["cache_creation"]; ok {
+		t.Fatalf("nested cache_creation must be absent when split is zero: %#v", usage["cache_creation"])
+	}
+}
+
+func TestAddCacheUsageFieldsAllZero(t *testing.T) {
+	usage := map[string]any{}
+	addCacheUsageFields(usage, protocol.Usage{})
+	if _, ok := usage["cache_creation_input_tokens"]; ok {
+		t.Fatalf("flat aggregate must be absent when zero")
+	}
+	if _, ok := usage["cache_read_input_tokens"]; ok {
+		t.Fatalf("cache_read must be absent when zero")
+	}
+	if _, ok := usage["cache_creation"]; ok {
+		t.Fatalf("nested cache_creation must be absent when zero")
+	}
+}
+
 func TestAnthropicStreamUsesSingleTextBlockIndex(t *testing.T) {
 	prov := streamProvider{events: []protocol.StreamEvent{
 		{Type: protocol.StreamTextDelta, Text: "hello"},

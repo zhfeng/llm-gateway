@@ -505,6 +505,132 @@ func TestAnthropicStreamToolInputAccumulatesDeltas(t *testing.T) {
 	}
 }
 
+func TestAnthropicResponseSplitCacheCreation(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":          "msg_test",
+			"model":       "provider-model",
+			"role":        "assistant",
+			"content":     []any{map[string]any{"type": "text", "text": "hi"}},
+			"stop_reason": "end_turn",
+			"usage": map[string]any{
+				"input_tokens":  1,
+				"output_tokens": 2,
+				"cache_creation": map[string]any{
+					"ephemeral_5m_input_tokens": 7,
+					"ephemeral_1h_input_tokens": 3,
+				},
+				"cache_read_input_tokens": 4,
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	p, err := New(config.ProviderConfig{Name: "anthropic", Type: config.ProviderAnthropicCompatible, BaseURL: upstream.URL + "/v1"}, "key", nil, time.Second, defaultTransport(), defaultHealthProbe(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := p.Complete(context.Background(), &protocol.Request{Model: "m", ProviderModel: "provider-model", MaxTokens: 10, Messages: []protocol.Message{{Role: protocol.RoleUser, Content: protocol.TextContent("hi")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.CacheCreation5mInputTokens != 7 || resp.Usage.CacheCreation1hInputTokens != 3 {
+		t.Fatalf("split fields: %+v", resp.Usage)
+	}
+	if resp.Usage.CacheCreationInputTokens != 10 {
+		t.Fatalf("aggregate must equal 5m+1h sum: %+v", resp.Usage)
+	}
+	if resp.Usage.CacheReadInputTokens != 4 {
+		t.Fatalf("cache read: %+v", resp.Usage)
+	}
+}
+
+func TestAnthropicResponseLegacyCacheCreation(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":          "msg_test",
+			"model":       "provider-model",
+			"role":        "assistant",
+			"content":     []any{map[string]any{"type": "text", "text": "hi"}},
+			"stop_reason": "end_turn",
+			"usage": map[string]any{
+				"input_tokens":                1,
+				"output_tokens":               2,
+				"cache_creation_input_tokens": 9,
+				"cache_read_input_tokens":     4,
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	p, err := New(config.ProviderConfig{Name: "anthropic", Type: config.ProviderAnthropicCompatible, BaseURL: upstream.URL + "/v1"}, "key", nil, time.Second, defaultTransport(), defaultHealthProbe(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := p.Complete(context.Background(), &protocol.Request{Model: "m", ProviderModel: "provider-model", MaxTokens: 10, Messages: []protocol.Message{{Role: protocol.RoleUser, Content: protocol.TextContent("hi")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.CacheCreationInputTokens != 9 {
+		t.Fatalf("aggregate: %+v", resp.Usage)
+	}
+	if resp.Usage.CacheCreation5mInputTokens != 0 || resp.Usage.CacheCreation1hInputTokens != 0 {
+		t.Fatalf("split fields must be zero when only aggregate is provided: %+v", resp.Usage)
+	}
+	if resp.Usage.CacheReadInputTokens != 4 {
+		t.Fatalf("cache read: %+v", resp.Usage)
+	}
+}
+
+func TestAnthropicStreamSplitCacheCreation(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("event: message_start\n"))
+		w.Write([]byte("data: {\"message\":{\"id\":\"msg\",\"model\":\"m\",\"usage\":{\"input_tokens\":1,\"cache_creation\":{\"ephemeral_5m_input_tokens\":7,\"ephemeral_1h_input_tokens\":3},\"cache_read_input_tokens\":4}}}\n\n"))
+		w.Write([]byte("event: content_block_start\n"))
+		w.Write([]byte("data: {\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"))
+		w.Write([]byte("event: content_block_delta\n"))
+		w.Write([]byte("data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"))
+		w.Write([]byte("event: content_block_stop\n"))
+		w.Write([]byte("data: {}\n\n"))
+		w.Write([]byte("event: message_delta\n"))
+		w.Write([]byte("data: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"))
+		w.Write([]byte("event: message_stop\n"))
+		w.Write([]byte("data: {}\n\n"))
+	}))
+	defer upstream.Close()
+
+	p, err := New(config.ProviderConfig{Name: "anthropic", Type: config.ProviderAnthropicCompatible, BaseURL: upstream.URL + "/v1"}, "", nil, time.Second, defaultTransport(), defaultHealthProbe(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := p.Stream(context.Background(), &protocol.Request{Model: "m", ProviderModel: "provider-model", Messages: []protocol.Message{{Role: protocol.RoleUser, Content: protocol.TextContent("hi")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var final *protocol.Response
+	for event := range events {
+		if event.Type == protocol.StreamMessageStop {
+			final = event.Response
+		}
+	}
+	if final == nil {
+		t.Fatalf("no final response")
+	}
+	if final.Usage.CacheCreation5mInputTokens != 7 || final.Usage.CacheCreation1hInputTokens != 3 {
+		t.Fatalf("split fields not propagated through stream: %+v", final.Usage)
+	}
+	if final.Usage.CacheCreationInputTokens != 10 {
+		t.Fatalf("aggregate must equal sum after message_start: %+v", final.Usage)
+	}
+	if final.Usage.CacheReadInputTokens != 4 {
+		t.Fatalf("cache read not propagated: %+v", final.Usage)
+	}
+	if final.Usage.OutputTokens != 5 {
+		t.Fatalf("output_tokens from message_delta: %+v", final.Usage)
+	}
+}
+
 func containsJSONKey(data []byte, key string) bool {
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {

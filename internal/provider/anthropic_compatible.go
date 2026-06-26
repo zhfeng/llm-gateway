@@ -59,6 +59,10 @@ type anthropicResponse struct {
 		OutputTokens             int `json:"output_tokens"`
 		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		CacheCreation            struct {
+			Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+			Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+		} `json:"cache_creation"`
 	} `json:"usage"`
 }
 
@@ -129,6 +133,11 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 				acc.ID = payload.Message.ID
 				acc.Model = payload.Message.Model
 				acc.Usage.InputTokens = payload.Message.Usage.InputTokens
+				acc.Usage.CacheCreationInputTokens = payload.Message.Usage.CacheCreationInputTokens
+				acc.Usage.CacheCreation5mInputTokens = payload.Message.Usage.CacheCreation.Ephemeral5mInputTokens
+				acc.Usage.CacheCreation1hInputTokens = payload.Message.Usage.CacheCreation.Ephemeral1hInputTokens
+				acc.Usage.CacheReadInputTokens = payload.Message.Usage.CacheReadInputTokens
+				deriveCacheCreationAggregate(&acc.Usage)
 			case "content_block_start":
 				var payload struct {
 					ContentBlock anthropicContentPart `json:"content_block"`
@@ -191,7 +200,14 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 						StopReason string `json:"stop_reason"`
 					} `json:"delta"`
 					Usage struct {
-						OutputTokens int `json:"output_tokens"`
+						InputTokens              int `json:"input_tokens"`
+						OutputTokens             int `json:"output_tokens"`
+						CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+						CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+						CacheCreation            struct {
+							Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+							Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+						} `json:"cache_creation"`
 					} `json:"usage"`
 				}
 				if err := json.Unmarshal(ev.Data, &payload); err != nil {
@@ -199,6 +215,22 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 				}
 				acc.StopReason = protocol.MapAnthropicStopReason(payload.Delta.StopReason)
 				acc.Usage.OutputTokens = payload.Usage.OutputTokens
+				if payload.Usage.InputTokens > 0 {
+					acc.Usage.InputTokens = payload.Usage.InputTokens
+				}
+				if payload.Usage.CacheCreationInputTokens > 0 {
+					acc.Usage.CacheCreationInputTokens = payload.Usage.CacheCreationInputTokens
+				}
+				if payload.Usage.CacheCreation.Ephemeral5mInputTokens > 0 {
+					acc.Usage.CacheCreation5mInputTokens = payload.Usage.CacheCreation.Ephemeral5mInputTokens
+				}
+				if payload.Usage.CacheCreation.Ephemeral1hInputTokens > 0 {
+					acc.Usage.CacheCreation1hInputTokens = payload.Usage.CacheCreation.Ephemeral1hInputTokens
+				}
+				if payload.Usage.CacheReadInputTokens > 0 {
+					acc.Usage.CacheReadInputTokens = payload.Usage.CacheReadInputTokens
+				}
+				deriveCacheCreationAggregate(&acc.Usage)
 			case "message_stop":
 				return nil
 			case "error":
@@ -407,6 +439,17 @@ func mergeAnthropicMessages(messages []anthropicMessage) []anthropicMessage {
 	return out
 }
 
+// deriveCacheCreationAggregate ensures Usage.CacheCreationInputTokens reflects
+// the sum of the per-TTL split fields when upstream omits the aggregate but
+// reports at least one of the ephemeral_{5m,1h}_input_tokens buckets. This
+// keeps the flat aggregate backward-compatible without double-counting when
+// upstream already provides it.
+func deriveCacheCreationAggregate(u *protocol.Usage) {
+	if u.CacheCreationInputTokens == 0 && (u.CacheCreation5mInputTokens > 0 || u.CacheCreation1hInputTokens > 0) {
+		u.CacheCreationInputTokens = u.CacheCreation5mInputTokens + u.CacheCreation1hInputTokens
+	}
+}
+
 func fromAnthropicResponse(resp anthropicResponse) *protocol.Response {
 	out := &protocol.Response{ID: resp.ID, Model: resp.Model, Role: resp.Role, StopReason: protocol.MapAnthropicStopReason(resp.StopReason)}
 	for _, part := range resp.Content {
@@ -420,7 +463,10 @@ func fromAnthropicResponse(resp anthropicResponse) *protocol.Response {
 	out.Usage.InputTokens = resp.Usage.InputTokens
 	out.Usage.OutputTokens = resp.Usage.OutputTokens
 	out.Usage.CacheCreationInputTokens = resp.Usage.CacheCreationInputTokens
+	out.Usage.CacheCreation5mInputTokens = resp.Usage.CacheCreation.Ephemeral5mInputTokens
+	out.Usage.CacheCreation1hInputTokens = resp.Usage.CacheCreation.Ephemeral1hInputTokens
 	out.Usage.CacheReadInputTokens = resp.Usage.CacheReadInputTokens
+	deriveCacheCreationAggregate(&out.Usage)
 	return out
 }
 
