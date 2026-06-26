@@ -371,6 +371,8 @@ func (h *HandlerGroup) streamOpenAI(w http.ResponseWriter, r *http.Request, req 
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	dstream.Flush(w)
+	dstream.WriteEvent(w, "", openAIRoleDeltaChunk(req.Model))
+	dstream.Flush(w)
 	for event := range events {
 		if event.Type == protocol.StreamError {
 			dstream.WriteEvent(w, "", openAIStreamError(event.Err))
@@ -544,6 +546,18 @@ func (h *HandlerGroup) writeAnthropicMessage(w http.ResponseWriter, resp *protoc
 			"output_tokens": resp.Usage.OutputTokens,
 		},
 	})
+}
+
+func openAIRoleDeltaChunk(model string) map[string]any {
+	return map[string]any{
+		"object": "chat.completion.chunk",
+		"model":  model,
+		"choices": []any{map[string]any{
+			"index":         0,
+			"delta":         map[string]any{"role": "assistant"},
+			"finish_reason": nil,
+		}},
+	}
 }
 
 func openAITextDeltaChunk(model, text string) map[string]any {

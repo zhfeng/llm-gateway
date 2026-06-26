@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -303,6 +304,54 @@ func TestAdmissionErrorFailsOverAndDoesNotPoisonHealth(t *testing.T) {
 		t.Fatal("local admission error should not poison provider health")
 	}
 	close(block)
+}
+
+func TestOpenAIStreamStartsWithRoleOnlyChunk(t *testing.T) {
+	prov := streamProvider{events: []protocol.StreamEvent{
+		{Type: protocol.StreamTextDelta, Text: "hello"},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", StopReason: protocol.StopEndTurn}},
+	}}
+	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
+	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.ChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	first := firstSSEData(t, w.Body.String())
+	var chunk struct {
+		Choices []struct {
+			Delta map[string]any `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(first), &chunk); err != nil {
+		t.Fatalf("decode first event: %v; data=%s", err, first)
+	}
+	if len(chunk.Choices) != 1 {
+		t.Fatalf("choices len = %d, want 1", len(chunk.Choices))
+	}
+	if got := chunk.Choices[0].Delta["role"]; got != "assistant" {
+		t.Fatalf("delta.role = %#v, want assistant; chunk=%s", got, first)
+	}
+	if _, ok := chunk.Choices[0].Delta["content"]; ok {
+		t.Fatalf("delta.content present in role opener; chunk=%s", first)
+	}
+}
+
+func firstSSEData(t *testing.T, body string) string {
+	t.Helper()
+	for _, event := range strings.Split(body, "\n\n") {
+		for _, line := range strings.Split(event, "\n") {
+			if strings.HasPrefix(line, "data: ") {
+				return strings.TrimPrefix(line, "data: ")
+			}
+		}
+	}
+	t.Fatalf("no SSE data event found; body=%s", body)
+	return ""
 }
 
 func TestAnthropicStreamIncludesLifecycleEvents(t *testing.T) {
