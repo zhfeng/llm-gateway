@@ -468,6 +468,7 @@ func (h *HandlerGroup) streamAnthropic(w http.ResponseWriter, r *http.Request, r
 			stopBlock()
 			if event.Response != nil {
 				usage := map[string]any{"input_tokens": event.Response.Usage.InputTokens, "output_tokens": event.Response.Usage.OutputTokens}
+				addCacheUsageFields(usage, event.Response.Usage)
 				dstream.WriteEvent(w, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": event.Response.StopReason, "stop_sequence": nil}, "usage": usage})
 			}
 			dstream.WriteEvent(w, "message_stop", map[string]any{"type": "message_stop"})
@@ -506,17 +507,19 @@ func (h *HandlerGroup) writeOpenAICompletion(w http.ResponseWriter, resp *protoc
 		}
 		choice["message"].(map[string]any)["tool_calls"] = calls
 	}
+	usage := map[string]any{
+		"prompt_tokens":     resp.Usage.InputTokens,
+		"completion_tokens": resp.Usage.OutputTokens,
+		"total_tokens":      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+	}
+	addCacheUsageFields(usage, resp.Usage)
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"id":      resp.ID,
 		"object":  "chat.completion",
 		"model":   resp.Model,
 		"created": time.Now().Unix(),
 		"choices": []any{choice},
-		"usage": map[string]any{
-			"prompt_tokens":     resp.Usage.InputTokens,
-			"completion_tokens": resp.Usage.OutputTokens,
-			"total_tokens":      resp.Usage.InputTokens + resp.Usage.OutputTokens,
-		},
+		"usage":   usage,
 	})
 }
 
@@ -534,6 +537,11 @@ func (h *HandlerGroup) writeAnthropicMessage(w http.ResponseWriter, resp *protoc
 	if len(content) == 0 {
 		content = append(content, map[string]any{"type": "text", "text": ""})
 	}
+	usage := map[string]any{
+		"input_tokens":  resp.Usage.InputTokens,
+		"output_tokens": resp.Usage.OutputTokens,
+	}
+	addCacheUsageFields(usage, resp.Usage)
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"id":          resp.ID,
 		"type":        "message",
@@ -541,10 +549,7 @@ func (h *HandlerGroup) writeAnthropicMessage(w http.ResponseWriter, resp *protoc
 		"content":     content,
 		"model":       resp.Model,
 		"stop_reason": resp.StopReason,
-		"usage": map[string]any{
-			"input_tokens":  resp.Usage.InputTokens,
-			"output_tokens": resp.Usage.OutputTokens,
-		},
+		"usage":       usage,
 	})
 }
 
@@ -613,16 +618,37 @@ func openAIStreamChunk(resp *protocol.Response) map[string]any {
 		},
 		"finish_reason": protocol.OpenAIStopReason(resp.StopReason),
 	}
+	usage := map[string]any{
+		"prompt_tokens":     resp.Usage.InputTokens,
+		"completion_tokens": resp.Usage.OutputTokens,
+		"total_tokens":      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+	}
+	addCacheUsageFields(usage, resp.Usage)
 	return map[string]any{
 		"id":      resp.ID,
 		"object":  "chat.completion.chunk",
 		"model":   resp.Model,
 		"choices": []any{choice},
-		"usage": map[string]any{
-			"prompt_tokens":     resp.Usage.InputTokens,
-			"completion_tokens": resp.Usage.OutputTokens,
-			"total_tokens":      resp.Usage.InputTokens + resp.Usage.OutputTokens,
-		},
+		"usage":   usage,
+	}
+}
+
+func addCacheUsageFields(usage map[string]any, u protocol.Usage) {
+	if u.CacheCreationInputTokens > 0 {
+		usage["cache_creation_input_tokens"] = u.CacheCreationInputTokens
+	}
+	if u.CacheReadInputTokens > 0 {
+		usage["cache_read_input_tokens"] = u.CacheReadInputTokens
+	}
+	if u.CacheCreation5mInputTokens > 0 || u.CacheCreation1hInputTokens > 0 {
+		cc := map[string]any{}
+		if u.CacheCreation5mInputTokens > 0 {
+			cc["ephemeral_5m_input_tokens"] = u.CacheCreation5mInputTokens
+		}
+		if u.CacheCreation1hInputTokens > 0 {
+			cc["ephemeral_1h_input_tokens"] = u.CacheCreation1hInputTokens
+		}
+		usage["cache_creation"] = cc
 	}
 }
 
