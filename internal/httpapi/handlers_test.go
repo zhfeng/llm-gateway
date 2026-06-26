@@ -119,7 +119,8 @@ func TestMessagesOversizedBodyReturns413(t *testing.T) {
 func TestOpenAICompletionMapsAnthropicRefusalToContentFilter(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
-			t.Fatalf("unexpected path %s", r.URL.Path)
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":          "msg_refusal",
