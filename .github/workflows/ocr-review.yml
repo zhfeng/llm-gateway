@@ -4,7 +4,8 @@
 # and posts review comments directly on the PR.
 #
 # Triggers:
-#   - PR opened from this repository
+#   - PR opened (uses pull_request_target for fork secret access)
+#   - Comment on PR containing '/open-code-review' or '@open-code-review'
 #
 # Required secrets:
 #   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
@@ -48,8 +49,13 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  pull_request:
+  # Use pull_request_target instead of pull_request so that secrets are
+  # available even for PRs from forks. This is safe because OCR only reads
+  # the diff and does not execute any code from the PR.
+  pull_request_target:
     types: [opened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -57,18 +63,38 @@ permissions:
 
 jobs:
   code-review:
-    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # Run on PR events, or on comments starting with trigger keywords
+    if: |
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/open-code-review')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '@open-code-review'))
     steps:
-      - name: Checkout base repository
+      - name: Get PR context
+        id: pr-context
+        if: github.event_name != 'pull_request_target'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // For issue_comment events, get PR info
+            const prNumber = context.issue.number;
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            core.setOutput('base_ref', pullRequest.base.ref);
+            core.setOutput('head_ref', pullRequest.head.ref);
+            core.setOutput('head_sha', pullRequest.head.sha);
+
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Full history needed for merge-base diff
-          # Review from the trusted base branch and diff against the fetched PR head ref.
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.event.pull_request.head.sha || steps.pr-context.outputs.head_sha }}
 
-      - name: Fetch PR head ref for diffing
-        run: git fetch origin pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/ocr-pr-head
+      - name: Fetch PR head ref (ensures fork commits are available)
+        run: git fetch origin pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -92,14 +118,23 @@ jobs:
       - name: Run OpenCodeReview
         id: review
         run: |
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          # Get base ref and head SHA from PR context (different for comment triggers)
+          # Note: We use HEAD_SHA instead of origin/${HEAD_REF} to support fork PRs,
+          # because fork branches don't exist on the origin remote.
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_REF="${{ steps.pr-context.outputs.base_ref }}"
+            HEAD_SHA="${{ steps.pr-context.outputs.head_sha }}"
+          fi
 
-          echo "Reviewing PR: origin/ocr-pr-head against origin/${BASE_REF}"
+          echo "Reviewing PR: ${HEAD_SHA} against origin/${BASE_REF}"
 
           # Run OCR in range mode with JSON output
           ocr review \
             --from "origin/${BASE_REF}" \
-            --to "origin/ocr-pr-head" \
+            --to "${HEAD_SHA}" \
             --format json \
             > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
 
@@ -156,7 +191,17 @@ jobs:
             let commitSha;
             
             // Get commit SHA from event context
-            commitSha = context.payload.pull_request.head.sha;
+            if (context.eventName === 'pull_request_target') {
+              commitSha = context.payload.pull_request.head.sha;
+            } else {
+              // For comment events, we need to fetch the PR
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              commitSha = pullRequest.head.sha;
+            }
 
             // Build review comments array for the PR review API
             // Only inline comments with line info can be posted via createReview
