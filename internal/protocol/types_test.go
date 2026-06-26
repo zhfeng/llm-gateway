@@ -16,6 +16,15 @@ func TestOpenAIStopReasonRefusal(t *testing.T) {
 	}
 }
 
+func TestMapOpenAIStopReasonContentFilterMapsToRefusal(t *testing.T) {
+	// An OpenAI-compatible upstream returning finish_reason:"content_filter"
+	// must be normalized to the canonical Anthropic "refusal" so it doesn't
+	// leak into Anthropic-compatible /v1/messages responses verbatim.
+	if got := MapOpenAIStopReason("content_filter"); got != "refusal" {
+		t.Fatalf("MapOpenAIStopReason(content_filter) = %q; want %q", got, "refusal")
+	}
+}
+
 func TestAnthropicStopReasonsMapToOpenAI(t *testing.T) {
 	tests := []struct {
 		anthropic string

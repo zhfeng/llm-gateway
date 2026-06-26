@@ -129,6 +129,10 @@ func ContentTextValue(blocks []ContentBlock) string {
 	return out
 }
 
+// MapOpenAIStopReason normalizes a finish_reason coming from an
+// OpenAI-compatible upstream into the canonical Anthropic-compatible stop
+// reason used internally (and emitted verbatim by writeAnthropicMessage).
+// The reverse OpenAI-facing translation lives in OpenAIStopReason.
 func MapOpenAIStopReason(reason string) string {
 	switch reason {
 	case "stop":
@@ -138,7 +142,9 @@ func MapOpenAIStopReason(reason string) string {
 	case "length":
 		return StopMaxTokens
 	case "content_filter":
-		return "content_filter"
+		// Canonical Anthropic form is "refusal"; the OpenAI-only
+		// "content_filter" token must not leak into Anthropic responses.
+		return "refusal"
 	default:
 		return reason
 	}
