@@ -87,14 +87,15 @@ jobs:
             core.setOutput('head_ref', pullRequest.head.ref);
             core.setOutput('head_sha', pullRequest.head.sha);
 
-      - name: Checkout repository
+      - name: Checkout base repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Full history needed for merge-base diff
-          ref: ${{ github.event.pull_request.head.sha || steps.pr-context.outputs.head_sha }}
+          # Keep the workspace on trusted base-repo code in privileged contexts.
+          ref: ${{ github.event.pull_request.base.ref || steps.pr-context.outputs.base_ref }}
 
-      - name: Fetch PR head ref (ensures fork commits are available)
-        run: git fetch origin pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
+      - name: Fetch PR head ref for diffing
+        run: git fetch origin pull/${{ github.event.pull_request.number || github.event.issue.number }}/head:refs/remotes/origin/ocr-pr-head
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -118,23 +119,19 @@ jobs:
       - name: Run OpenCodeReview
         id: review
         run: |
-          # Get base ref and head SHA from PR context (different for comment triggers)
-          # Note: We use HEAD_SHA instead of origin/${HEAD_REF} to support fork PRs,
-          # because fork branches don't exist on the origin remote.
+          # Get the trusted base ref for the checked-out workspace.
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             BASE_REF="${{ github.event.pull_request.base.ref }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           else
             BASE_REF="${{ steps.pr-context.outputs.base_ref }}"
-            HEAD_SHA="${{ steps.pr-context.outputs.head_sha }}"
           fi
 
-          echo "Reviewing PR: ${HEAD_SHA} against origin/${BASE_REF}"
+          echo "Reviewing PR: origin/ocr-pr-head against origin/${BASE_REF}"
 
           # Run OCR in range mode with JSON output
           ocr review \
             --from "origin/${BASE_REF}" \
-            --to "${HEAD_SHA}" \
+            --to "origin/ocr-pr-head" \
             --format json \
             > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
 
