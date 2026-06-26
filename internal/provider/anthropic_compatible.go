@@ -145,7 +145,6 @@ func (p *HTTPProvider) streamAnthropic(ctx context.Context, req *protocol.Reques
 						Type        string `json:"type"`
 						Text        string `json:"text"`
 						Thinking    string `json:"thinking"`
-						Signature   string `json:"signature"`
 						PartialJSON string `json:"partial_json"`
 					} `json:"delta"`
 				}
