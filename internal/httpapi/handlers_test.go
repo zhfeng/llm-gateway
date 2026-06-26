@@ -401,3 +401,130 @@ func TestOpenAIStreamSurfacesThinkingAsReasoningContent(t *testing.T) {
 		t.Fatalf("body missing terminator: %s", body)
 	}
 }
+
+func TestAnthropicStreamUsesSingleTextBlockIndex(t *testing.T) {
+	prov := streamProvider{events: []protocol.StreamEvent{
+		{Type: protocol.StreamTextDelta, Text: "hello"},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", StopReason: protocol.StopEndTurn}},
+	}}
+	h := anthropicStreamTestHandler(prov)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.Messages(w, req)
+
+	events := parseAnthropicStreamEvents(t, w.Body.String())
+	assertAnthropicStreamEvent(t, events, "content_block_start", 0, "text")
+	assertAnthropicStreamEvent(t, events, "content_block_delta", 0, "text_delta")
+	assertAnthropicStreamEvent(t, events, "content_block_stop", 0, "")
+}
+
+func TestAnthropicStreamAdvancesIndexOnTextToToolUseTransition(t *testing.T) {
+	prov := streamProvider{events: []protocol.StreamEvent{
+		{Type: protocol.StreamTextDelta, Text: "hello"},
+		{Type: protocol.StreamToolCall, ToolCallID: "call_1", ToolName: "lookup", ToolInput: `{"q":"x"}`},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", StopReason: protocol.StopToolUse}},
+	}}
+	h := anthropicStreamTestHandler(prov)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.Messages(w, req)
+
+	events := parseAnthropicStreamEvents(t, w.Body.String())
+	assertAnthropicStreamEvent(t, events, "content_block_start", 0, "text")
+	assertAnthropicStreamEvent(t, events, "content_block_stop", 0, "")
+	assertAnthropicStreamEvent(t, events, "content_block_start", 1, "tool_use")
+	assertAnthropicStreamEvent(t, events, "content_block_delta", 1, "input_json_delta")
+	assertAnthropicStreamEvent(t, events, "content_block_stop", 1, "")
+}
+
+func TestAnthropicStreamUsesDistinctIndexesForToolUseBlocks(t *testing.T) {
+	prov := streamProvider{events: []protocol.StreamEvent{
+		{Type: protocol.StreamToolCall, ToolCallID: "call_1", ToolName: "lookup", ToolInput: `{"q":"x"}`},
+		{Type: protocol.StreamToolCall, ToolCallID: "call_2", ToolName: "lookup", ToolInput: `{"q":"y"}`},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", StopReason: protocol.StopToolUse}},
+	}}
+	h := anthropicStreamTestHandler(prov)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	w := httptest.NewRecorder()
+
+	h.Messages(w, req)
+
+	events := parseAnthropicStreamEvents(t, w.Body.String())
+	assertAnthropicStreamEvent(t, events, "content_block_start", 0, "tool_use")
+	assertAnthropicStreamEvent(t, events, "content_block_delta", 0, "input_json_delta")
+	assertAnthropicStreamEvent(t, events, "content_block_stop", 0, "")
+	assertAnthropicStreamEvent(t, events, "content_block_start", 1, "tool_use")
+	assertAnthropicStreamEvent(t, events, "content_block_delta", 1, "input_json_delta")
+	assertAnthropicStreamEvent(t, events, "content_block_stop", 1, "")
+}
+
+func anthropicStreamTestHandler(prov provider.Provider) *HandlerGroup {
+	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
+	return New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
+}
+
+type sseEvent struct {
+	Name string
+	Data map[string]any
+}
+
+func parseAnthropicStreamEvents(t *testing.T, body string) []sseEvent {
+	t.Helper()
+	var events []sseEvent
+	var name string
+	var data string
+	flush := func() {
+		if name == "" && data == "" {
+			return
+		}
+		if data == "" {
+			t.Fatalf("event %q has no data; body=%s", name, body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			t.Fatalf("decode event %q: %v; data=%s", name, err, data)
+		}
+		events = append(events, sseEvent{Name: name, Data: payload})
+		name = ""
+		data = ""
+	}
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "event: "):
+			name = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			if data != "" {
+				data += "\n"
+			}
+			data += strings.TrimPrefix(line, "data: ")
+		}
+	}
+	flush()
+	return events
+}
+
+func assertAnthropicStreamEvent(t *testing.T, events []sseEvent, name string, index int, deltaOrBlockType string) {
+	t.Helper()
+	for _, event := range events {
+		if event.Name != name {
+			continue
+		}
+		if got, ok := event.Data["index"].(float64); !ok || int(got) != index {
+			continue
+		}
+		if deltaOrBlockType == "" {
+			return
+		}
+		if block, ok := event.Data["content_block"].(map[string]any); ok && block["type"] == deltaOrBlockType {
+			return
+		}
+		if delta, ok := event.Data["delta"].(map[string]any); ok && delta["type"] == deltaOrBlockType {
+			return
+		}
+	}
+	t.Fatalf("missing %s with index %d and type %q in events %#v", name, index, deltaOrBlockType, events)
+}
