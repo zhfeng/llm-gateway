@@ -161,8 +161,6 @@ func OpenAIStopReason(reason string) string {
 		return "tool_calls"
 	case StopMaxTokens:
 		return "length"
-	case "content_filter":
-		return "content_filter"
 	default:
 		if reason == "" {
 			return "stop"
