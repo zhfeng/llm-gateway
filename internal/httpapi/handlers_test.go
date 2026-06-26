@@ -132,7 +132,7 @@ func TestOpenAICompletionMapsAnthropicRefusalToContentFilter(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	prov, err := provider.New(config.ProviderConfig{Name: "anthropic", Type: config.ProviderAnthropicCompatible, BaseURL: upstream.URL + "/v1"}, "key", nil, time.Second, config.TransportRuntime{}, config.ProviderHealthProbeRuntime{}, false)
+	prov, err := provider.New(config.ProviderConfig{Name: "p1", Type: config.ProviderAnthropicCompatible, BaseURL: upstream.URL + "/v1"}, "key", nil, time.Second, config.TransportRuntime{}, config.ProviderHealthProbeRuntime{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestOpenAICompletionMapsAnthropicRefusalToContentFilter(t *testing.T) {
 
 func TestOpenAIStreamMapsAnthropicRefusalToContentFilter(t *testing.T) {
 	prov := streamProvider{events: []protocol.StreamEvent{
-		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", Role: protocol.RoleAssistant, StopReason: "content_filter"}},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", Role: protocol.RoleAssistant, StopReason: protocol.MapAnthropicStopReason("refusal")}},
 	}}
 	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
 	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})
