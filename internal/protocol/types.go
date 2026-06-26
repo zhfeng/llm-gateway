@@ -144,13 +144,14 @@ func MapOpenAIStopReason(reason string) string {
 	}
 }
 
+// MapAnthropicStopReason normalizes a stop_reason coming from an Anthropic
+// upstream into the canonical Anthropic-compatible form. Anthropic's own
+// SDKs/clients consume this value verbatim through the
+// Anthropic-compatible /v1/messages response, so any OpenAI-specific
+// remapping (e.g. "refusal" -> "content_filter") must NOT happen here —
+// that translation belongs in OpenAIStopReason.
 func MapAnthropicStopReason(reason string) string {
-	switch reason {
-	case "refusal":
-		return "content_filter"
-	default:
-		return reason
-	}
+	return reason
 }
 
 func OpenAIStopReason(reason string) string {
@@ -161,6 +162,8 @@ func OpenAIStopReason(reason string) string {
 		return "tool_calls"
 	case StopMaxTokens:
 		return "length"
+	case "refusal":
+		return "content_filter"
 	default:
 		if reason == "" {
 			return "stop"

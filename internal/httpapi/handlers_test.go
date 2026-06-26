@@ -165,7 +165,7 @@ func TestOpenAICompletionMapsAnthropicRefusalToContentFilter(t *testing.T) {
 
 func TestOpenAIStreamMapsAnthropicRefusalToContentFilter(t *testing.T) {
 	prov := streamProvider{events: []protocol.StreamEvent{
-		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", Role: protocol.RoleAssistant, StopReason: protocol.MapAnthropicStopReason("refusal")}},
+		{Type: protocol.StreamMessageStop, Response: &protocol.Response{Model: "m", Role: protocol.RoleAssistant, StopReason: "refusal"}},
 	}}
 	registry := models.New(config.Config{Providers: []config.ProviderConfig{{Name: "p1", Type: config.ProviderAnthropicCompatible}}, Models: map[string]config.ModelRoute{"m": {Provider: "p1", ProviderModel: "pm"}}}, map[string]provider.Provider{"p1": prov}, time.Hour, true, time.Hour, 10000)
 	h := New(registry, nil, 1<<20, false, Options{StickyWeightedEnabled: true, StickyWeightedHeader: "X-LLM-Gateway-Sticky-Key", StickyWeightedFallback: "auth_key", RetryMaxAttempts: 1})

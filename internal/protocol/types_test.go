@@ -2,9 +2,17 @@ package protocol
 
 import "testing"
 
-func TestMapAnthropicStopReasonRefusal(t *testing.T) {
-	if got := MapAnthropicStopReason("refusal"); got != "content_filter" {
-		t.Fatalf("MapAnthropicStopReason(refusal) = %q; want %q", got, "content_filter")
+func TestMapAnthropicStopReasonRefusalPassesThrough(t *testing.T) {
+	// Anthropic clients must receive "refusal" verbatim — the OpenAI-only
+	// remapping to "content_filter" lives in OpenAIStopReason.
+	if got := MapAnthropicStopReason("refusal"); got != "refusal" {
+		t.Fatalf("MapAnthropicStopReason(refusal) = %q; want %q", got, "refusal")
+	}
+}
+
+func TestOpenAIStopReasonRefusal(t *testing.T) {
+	if got := OpenAIStopReason("refusal"); got != "content_filter" {
+		t.Fatalf("OpenAIStopReason(refusal) = %q; want %q", got, "content_filter")
 	}
 }
 
