@@ -69,6 +69,20 @@ func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *h
 		authn.Add(static.NewAuthenticator(cfg.GatewayAPIKeys))
 	}
 
+	// A "static" authenticator configured via auth.authenticators[] is
+	// functionally identical to the legacy api_keys/api_keys_env path (the
+	// chain accepts the union of keys), so configuring both is redundant.
+	// Warn so users consolidate into a single location rather than split
+	// keys across two places.
+	if len(cfg.GatewayAPIKeys) > 0 {
+		for _, spec := range cfg.Config.Auth.Authenticators {
+			if spec.Type == "static" {
+				slog.Warn("static authenticator configured via both auth.api_keys (or api_keys_env) and auth.authenticators[]; consider consolidating into a single location to avoid redundancy")
+				break
+			}
+		}
+	}
+
 	// Plugin path: auth.authenticators[] is now actually consumed. An unknown
 	// type or a factory error fails fast here so a typo can't silently disable
 	// authentication.

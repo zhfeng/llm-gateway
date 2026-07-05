@@ -131,6 +131,15 @@ func TestFactory_KeysElementNotString(t *testing.T) {
 	}
 }
 
+func TestFactory_EmptyKeys(t *testing.T) {
+	// An empty keys array would build an inert authenticator that silently
+	// rejects every request. Factory must fail fast at startup instead.
+	_, err := Factory(map[string]any{"keys": []string{}})
+	if err == nil {
+		t.Fatal("expected error when config.keys is empty, got nil")
+	}
+}
+
 func TestFactory_Name(t *testing.T) {
 	a, err := Factory(map[string]any{"keys": []string{"k"}})
 	if err != nil {

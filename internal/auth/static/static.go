@@ -32,6 +32,9 @@ func Factory(cfg map[string]any) (auth.Authenticator, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(keys) == 0 {
+		return nil, errors.New("config.keys must contain at least one key")
+	}
 	return NewAuthenticator(keys), nil
 }
 
