@@ -76,7 +76,7 @@ func (a *Authenticator) Name() string {
 	return "static"
 }
 
-func (a *Authenticator) Authenticate(r *http.Request) (*auth.Identity, bool) {
+func (a *Authenticator) Authenticate(r *http.Request) (*auth.Identity, bool, error) {
 	provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if provided == "" {
 		provided = r.Header.Get("x-api-key")
@@ -87,7 +87,9 @@ func (a *Authenticator) Authenticate(r *http.Request) (*auth.Identity, bool) {
 			ID:          "static_key",
 			Type:        "api_key",
 			Permissions: auth.Permissions{},
-		}, true
+		}, true, nil
 	}
-	return nil, false
+	// A missing or non-matching key means "this credential is not for me";
+	// the chain should try the next authenticator, so return no error.
+	return nil, false, nil
 }

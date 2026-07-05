@@ -8,13 +8,19 @@ import (
 type mockAuthenticator struct {
 	name       string
 	shouldAuth bool
+	err        error
+	called     bool
 }
 
-func (m *mockAuthenticator) Authenticate(r *http.Request) (*Identity, bool) {
-	if m.shouldAuth {
-		return &Identity{ID: m.name, Type: "mock"}, true
+func (m *mockAuthenticator) Authenticate(r *http.Request) (*Identity, bool, error) {
+	m.called = true
+	if m.err != nil {
+		return nil, false, m.err
 	}
-	return nil, false
+	if m.shouldAuth {
+		return &Identity{ID: m.name, Type: "mock"}, true, nil
+	}
+	return nil, false, nil
 }
 
 func (m *mockAuthenticator) Name() string {
@@ -28,7 +34,7 @@ func TestAuthenticatorChain_FirstWins(t *testing.T) {
 	)
 
 	req, _ := http.NewRequest("GET", "/", nil)
-	id, ok := chain.Authenticate(req)
+	id, ok, _ := chain.Authenticate(req)
 	if !ok {
 		t.Fatal("expected authentication to succeed")
 	}
@@ -44,7 +50,7 @@ func TestAuthenticatorChain_FallsThrough(t *testing.T) {
 	)
 
 	req, _ := http.NewRequest("GET", "/", nil)
-	id, ok := chain.Authenticate(req)
+	id, ok, _ := chain.Authenticate(req)
 	if !ok {
 		t.Fatal("expected authentication to succeed")
 	}
@@ -53,13 +59,42 @@ func TestAuthenticatorChain_FallsThrough(t *testing.T) {
 	}
 }
 
+func TestAuthenticatorChain_StopsOnError(t *testing.T) {
+	// An authenticator that recognises the credential but rejects it
+	// (err != nil) must stop the chain — the second authenticator must
+	// never be called, and the error must be surfaced.
+	wantErr := &AuthError{Type: "expired_token", Message: "token has expired"}
+	first := &mockAuthenticator{name: "first", err: wantErr}
+	second := &mockAuthenticator{name: "second", shouldAuth: true}
+	chain := NewAuthenticatorChain(first, second)
+
+	req, _ := http.NewRequest("GET", "/", nil)
+	id, ok, err := chain.Authenticate(req)
+
+	if ok {
+		t.Fatal("expected authentication to fail when first returns error")
+	}
+	if id != nil {
+		t.Fatal("expected nil identity when chain returns error")
+	}
+	if err != wantErr {
+		t.Fatalf("expected chain to surface first authenticator's error, got %v", err)
+	}
+	if second.called {
+		t.Fatal("expected second authenticator to NOT be called after first returns error")
+	}
+}
+
 func TestAuthenticatorChain_EmptyRejects(t *testing.T) {
 	chain := NewAuthenticatorChain()
 
 	req, _ := http.NewRequest("GET", "/", nil)
-	_, ok := chain.Authenticate(req)
+	_, ok, err := chain.Authenticate(req)
 	if ok {
 		t.Fatal("expected empty chain to reject all")
+	}
+	if err != nil {
+		t.Fatalf("expected empty chain to return no error, got %v", err)
 	}
 }
 
