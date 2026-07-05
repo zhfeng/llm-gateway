@@ -39,7 +39,7 @@ Authorization: Bearer <gateway key>
 x-api-key: <gateway key>
 ```
 
-The gateway key comes from `auth.api_keys` or `auth.api_keys_env`.
+The gateway key comes from `auth.api_keys`, `auth.api_keys_env`, or the `static` plugin configured under `auth.authenticators[]` (see [configuration](../reference/configuration.md#authauthenticators)). A request is accepted if it matches any configured authenticator: the legacy `api_keys`/`api_keys_env` keys are checked first, followed by any `auth.authenticators[]` entries in listed order.
 
 For local-only testing, you can disable gateway auth:
 
@@ -48,6 +48,10 @@ For local-only testing, you can disable gateway auth:
 ```
 
 Do not use this in production.
+
+## Gateway fails to start: unknown authenticator type
+
+If `auth.authenticators[]` references a `type` that isn't registered, the gateway fails fast at startup with an error like `auth.authenticators[0]: unknown authenticator type "no-such-type"`. Only `static` is built in. Check the `type` spelling and remove any unimplemented entries.
 
 ## Check provider health
 

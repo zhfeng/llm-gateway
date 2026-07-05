@@ -96,7 +96,10 @@ func TestRequestIDGeneratesMissingHeader(t *testing.T) {
 }
 
 func TestNewHandlerAddsRequestIDHeader(t *testing.T) {
-	handler := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	handler, err := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
 
@@ -108,7 +111,10 @@ func TestNewHandlerAddsRequestIDHeader(t *testing.T) {
 }
 
 func TestHealthRoutesBypassAuth(t *testing.T) {
-	handler := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	handler, err := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, path := range []string{"/healthz", "/readyz"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -123,7 +129,10 @@ func TestHealthRoutesBypassAuth(t *testing.T) {
 }
 
 func TestAPIRoutesRequireAuth(t *testing.T) {
-	handler := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	handler, err := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()
 
@@ -135,7 +144,10 @@ func TestAPIRoutesRequireAuth(t *testing.T) {
 }
 
 func TestAPIRoutesAllowValidAuth(t *testing.T) {
-	handler := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	handler, err := newHandler(testRuntime(false, []string{"secret"}), testRegistry(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	w := httptest.NewRecorder()
@@ -168,4 +180,71 @@ func testRuntime(authDisabled bool, keys []string) *config.Runtime {
 
 func testRegistry() *models.Registry {
 	return models.New(config.Config{Models: map[string]config.ModelRoute{}}, nil, time.Hour, true, time.Hour, 10000)
+}
+
+func TestNewHandlerFailsFastOnUnknownAuthenticatorType(t *testing.T) {
+	rt := testRuntime(false, nil)
+	rt.Config.Auth.Authenticators = []config.AuthProviderConfig{
+		{Type: "no-such-type", Config: map[string]any{}},
+	}
+
+	_, err := newHandler(rt, testRegistry(), nil)
+	if err == nil {
+		t.Fatal("expected error for unknown authenticator type, got nil")
+	}
+}
+
+func TestNewHandlerBuildsStaticAuthenticatorFromConfig(t *testing.T) {
+	// A static authenticator configured via the plugin path (not via the
+	// legacy GatewayAPIKeys field) should authenticate requests.
+	rt := testRuntime(false, nil)
+	rt.Config.Auth.Authenticators = []config.AuthProviderConfig{
+		{Type: "static", Config: map[string]any{"keys": []string{"plugin-key"}}},
+	}
+
+	handler, err := newHandler(rt, testRegistry(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No credentials → 401.
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("without auth status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	// Plugin key → 200.
+	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer plugin-key")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("with plugin key status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestNewHandlerLegacyAndPluginAuthenticatorsCoexist(t *testing.T) {
+	// Both the legacy GatewayAPIKeys and a plugin static authenticator should
+	// be wired into the chain so either key works.
+	rt := testRuntime(false, []string{"legacy-key"})
+	rt.Config.Auth.Authenticators = []config.AuthProviderConfig{
+		{Type: "static", Config: map[string]any{"keys": []string{"plugin-key"}}},
+	}
+
+	handler, err := newHandler(rt, testRegistry(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, key := range []string{"legacy-key", "plugin-key"} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("key %q status = %d, want %d", key, w.Code, http.StatusOK)
+		}
+	}
 }
