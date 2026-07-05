@@ -20,9 +20,13 @@ func Start(ctx context.Context, cfg *config.Runtime, registry *models.Registry, 
 	if cfg.Config.Auth.Disable {
 		slog.Warn("gateway API key authentication is disabled; this is very dangerous in production and should only be used for local testing")
 	}
+	handler, err := newHandler(cfg, registry, healthManager)
+	if err != nil {
+		return err
+	}
 	server := &http.Server{
 		Addr:              cfg.Config.Server.Addr,
-		Handler:           newHandler(cfg, registry, healthManager),
+		Handler:           handler,
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
@@ -51,12 +55,29 @@ func Start(ctx context.Context, cfg *config.Runtime, registry *models.Registry, 
 	}
 }
 
-func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *health.Manager) http.Handler {
+func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *health.Manager) (http.Handler, error) {
+	// Register the built-in authenticator factory. Idempotent, so safe to
+	// call on every Start (and every test invocation of newHandler).
+	auth.RegisterAuthenticator("static", static.Factory)
+
 	authn := auth.NewAuthenticatorChain()
 	authz := auth.NewAuthorizerChain()
 
+	// Legacy path: literal/env gateway API keys remain fully backward
+	// compatible and continue to work without any config change.
 	if len(cfg.GatewayAPIKeys) > 0 {
 		authn.Add(static.NewAuthenticator(cfg.GatewayAPIKeys))
+	}
+
+	// Plugin path: auth.authenticators[] is now actually consumed. An unknown
+	// type or a factory error fails fast here so a typo can't silently disable
+	// authentication.
+	pluginAuthenticators, err := auth.BuildAuthenticators(cfg.Config.Auth.Authenticators)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range pluginAuthenticators {
+		authn.Add(a)
 	}
 
 	authMiddleware := AuthMiddleware(authn, authz, cfg.Config.Auth.Disable)
@@ -90,7 +111,7 @@ func newHandler(cfg *config.Runtime, registry *models.Registry, healthManager *h
 		json.NewEncoder(w).Encode(body)
 	})
 
-	return Chain(mux, requestID, requestMetrics)
+	return Chain(mux, requestID, requestMetrics), nil
 }
 
 func requestMetrics(next http.Handler) http.Handler {

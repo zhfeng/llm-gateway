@@ -74,3 +74,69 @@ func TestAuthenticator_Name(t *testing.T) {
 		t.Errorf("expected Name static, got %s", a.Name())
 	}
 }
+
+func TestFactory_WithStringKeys(t *testing.T) {
+	a, err := Factory(map[string]any{"keys": []string{"alpha", "beta"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer alpha")
+	if _, ok := a.Authenticate(req); !ok {
+		t.Fatal("expected Factory-built authenticator to accept a configured key")
+	}
+}
+
+func TestFactory_WithJSONKeys(t *testing.T) {
+	// encoding/json produces []any for JSON arrays, so Factory must accept
+	// that shape — this mirrors what happens after config unmarshalling.
+	a, err := Factory(map[string]any{"keys": []any{"alpha", "beta"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer beta")
+	if _, ok := a.Authenticate(req); !ok {
+		t.Fatal("expected Factory-built authenticator to accept a configured key from []any")
+	}
+}
+
+func TestFactory_MissingKeys(t *testing.T) {
+	_, err := Factory(map[string]any{})
+	if err == nil {
+		t.Fatal("expected error when config.keys is missing, got nil")
+	}
+}
+
+func TestFactory_NilConfig(t *testing.T) {
+	_, err := Factory(nil)
+	if err == nil {
+		t.Fatal("expected error when config is nil, got nil")
+	}
+}
+
+func TestFactory_KeysWrongType(t *testing.T) {
+	_, err := Factory(map[string]any{"keys": "not-an-array"})
+	if err == nil {
+		t.Fatal("expected error when config.keys is not an array, got nil")
+	}
+}
+
+func TestFactory_KeysElementNotString(t *testing.T) {
+	_, err := Factory(map[string]any{"keys": []any{"ok", 42}})
+	if err == nil {
+		t.Fatal("expected error when a config.keys element is not a string, got nil")
+	}
+}
+
+func TestFactory_Name(t *testing.T) {
+	a, err := Factory(map[string]any{"keys": []string{"k"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Name() != "static" {
+		t.Errorf("expected Name static, got %s", a.Name())
+	}
+}

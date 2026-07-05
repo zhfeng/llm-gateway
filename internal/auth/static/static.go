@@ -1,6 +1,8 @@
 package static
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -19,6 +21,52 @@ func NewAuthenticator(keys []string) *Authenticator {
 		}
 	}
 	return &Authenticator{keys: keyMap}
+}
+
+// Factory is the registry entry for the "static" authenticator. It reads
+// config.keys ([]string) and returns a static Authenticator, or an error if
+// keys is missing or not a string array. It is registered as
+// auth.RegisterAuthenticator("static", Factory) by the server.
+func Factory(cfg map[string]any) (auth.Authenticator, error) {
+	keys, err := readKeys(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewAuthenticator(keys), nil
+}
+
+// readKeys extracts a []string from cfg["keys"], accepting both []string
+// (programmatic configs) and []any (the shape produced by encoding/json, which
+// is what config.AuthProviderConfig.Config holds after unmarshalling).
+func readKeys(cfg map[string]any) ([]string, error) {
+	if cfg == nil {
+		return nil, errors.New("config is required")
+	}
+	raw, ok := cfg["keys"]
+	if !ok {
+		return nil, errors.New("config.keys is required")
+	}
+	if raw == nil {
+		return nil, errors.New("config.keys must not be null")
+	}
+	// Fast path: a real []string (e.g. constructed in Go).
+	if arr, ok := raw.([]string); ok {
+		return arr, nil
+	}
+	// JSON path: arrays unmarshal into []interface{} (== []any).
+	ifaceArr, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("config.keys must be a []string, got %T", raw)
+	}
+	keys := make([]string, 0, len(ifaceArr))
+	for i, v := range ifaceArr {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("config.keys[%d] must be a string, got %T", i, v)
+		}
+		keys = append(keys, s)
+	}
+	return keys, nil
 }
 
 func (a *Authenticator) Name() string {
