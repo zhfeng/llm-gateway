@@ -77,7 +77,7 @@ func (a *Authenticator) Name() string {
 }
 
 func (a *Authenticator) Authenticate(r *http.Request) (*auth.Identity, bool, error) {
-	provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	provided := bearerToken(r.Header.Get("Authorization"))
 	if provided == "" {
 		provided = r.Header.Get("x-api-key")
 	}
@@ -92,4 +92,18 @@ func (a *Authenticator) Authenticate(r *http.Request) (*auth.Identity, bool, err
 	// A missing or non-matching key means "this credential is not for me";
 	// the chain should try the next authenticator, so return no error.
 	return nil, false, nil
+}
+
+// bearerToken returns the token from an "Authorization: Bearer <token>"
+// header, or "" if the header is absent or uses a scheme other than "Bearer"
+// (e.g. "Basic …"). A non-Bearer Authorization header must not be treated as
+// a candidate key — the caller falls back to x-api-key instead, so an
+// upstream-injected "Basic" header can't shadow a valid x-api-key and turn a
+// successful auth into a silent 401.
+func bearerToken(authorization string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authorization, prefix) {
+		return ""
+	}
+	return authorization[len(prefix):]
 }

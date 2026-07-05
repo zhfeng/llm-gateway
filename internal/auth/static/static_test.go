@@ -75,6 +75,38 @@ func TestAuthenticator_Name(t *testing.T) {
 	}
 }
 
+func TestAuthenticator_NonBearerAuthorizationFallsBackToXAPIKey(t *testing.T) {
+	// A non-Bearer Authorization header (e.g. "Basic …") must not be treated
+	// as a candidate key; the authenticator must fall back to x-api-key so a
+	// valid key still authenticates even when an upstream injects a
+	// non-Bearer Authorization header.
+	a := NewAuthenticator([]string{"valid-key"})
+
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	req.Header.Set("x-api-key", "valid-key")
+
+	_, ok, _ := a.Authenticate(req)
+	if !ok {
+		t.Fatal("expected valid x-api-key to authenticate when a non-Bearer Authorization header is present")
+	}
+}
+
+func TestAuthenticator_NonBearerAuthorizationNotTreatedAsKey(t *testing.T) {
+	// With only a non-Bearer Authorization header (and no x-api-key), the
+	// authenticator must not authenticate — the raw header value is never used
+	// as a candidate key.
+	a := NewAuthenticator([]string{"valid-key"})
+
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+
+	_, ok, _ := a.Authenticate(req)
+	if ok {
+		t.Fatal("expected non-Bearer Authorization without x-api-key to be rejected")
+	}
+}
+
 func TestFactory_WithStringKeys(t *testing.T) {
 	a, err := Factory(map[string]any{"keys": []string{"alpha", "beta"}})
 	if err != nil {
