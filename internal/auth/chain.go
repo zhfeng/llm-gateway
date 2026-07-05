@@ -14,13 +14,19 @@ func (c *AuthenticatorChain) Add(a Authenticator) {
 	c.authenticators = append(c.authenticators, a)
 }
 
-func (c *AuthenticatorChain) Authenticate(r *http.Request) (*Identity, bool) {
+func (c *AuthenticatorChain) Authenticate(r *http.Request) (*Identity, bool, error) {
 	for _, a := range c.authenticators {
-		if id, ok := a.Authenticate(r); ok {
-			return id, true
+		id, ok, err := a.Authenticate(r)
+		if err != nil {
+			// An authenticator recognised the credential but rejected it
+			// (invalid/expired). Stop the chain and surface the error.
+			return nil, false, err
+		}
+		if ok {
+			return id, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (c *AuthenticatorChain) HasAuthenticators() bool {

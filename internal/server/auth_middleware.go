@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/zhfeng/llm-gateway/internal/auth"
@@ -19,7 +20,20 @@ func AuthMiddleware(authn *auth.AuthenticatorChain, authz *auth.AuthorizerChain,
 				return
 			}
 
-			identity, authenticated := authn.Authenticate(r)
+			identity, authenticated, err := authn.Authenticate(r)
+			if err != nil {
+				// An authenticator recognised the credential but rejected it
+				// (e.g. an expired token). Surface its specific reason instead
+				// of the generic "invalid API key" so the client gets an
+				// actionable signal.
+				var ae *auth.AuthError
+				if errors.As(err, &ae) {
+					gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, ae.Type, ae.Message))
+				} else {
+					gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, "authentication_error", err.Error()))
+				}
+				return
+			}
 			if !authenticated {
 				gwerror.WriteOpenAI(w, gwerror.New(http.StatusUnauthorized, "authentication_error", "invalid API key"))
 				return

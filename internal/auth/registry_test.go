@@ -12,8 +12,8 @@ import (
 // stubAuthenticator is a minimal Authenticator used only for registry tests.
 type stubAuthenticator struct{ name string }
 
-func (s *stubAuthenticator) Authenticate(r *http.Request) (*Identity, bool) {
-	return nil, false
+func (s *stubAuthenticator) Authenticate(r *http.Request) (*Identity, bool, error) {
+	return nil, false, nil
 }
 func (s *stubAuthenticator) Name() string { return s.name }
 

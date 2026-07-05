@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zhfeng/llm-gateway/internal/auth"
@@ -116,6 +117,44 @@ func TestAuthMiddleware_PermissionDenied(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", w.Code)
+	}
+}
+
+// errorAuthenticator simulates an authenticator that recognises a credential
+// but rejects it as invalid/expired (e.g. an expired JWT). It returns an
+// AuthError so the middleware can surface a specific reason in the 401 body.
+type errorAuthenticator struct{}
+
+func (e *errorAuthenticator) Authenticate(_ *http.Request) (*auth.Identity, bool, error) {
+	return nil, false, &auth.AuthError{Type: "expired_token", Message: "token has expired"}
+}
+
+func (e *errorAuthenticator) Name() string { return "error" }
+
+func TestAuthMiddleware_AuthErrorBody(t *testing.T) {
+	authn := auth.NewAuthenticatorChain(&errorAuthenticator{})
+	authz := auth.NewAuthorizerChain()
+	middleware := AuthMiddleware(authn, authz, false)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called for an auth error")
+	})
+
+	req, _ := http.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer some-token")
+	w := httptest.NewRecorder()
+
+	middleware(next).ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "expired_token") {
+		t.Errorf("expected response body to contain the specific error type 'expired_token', got: %s", body)
+	}
+	if !strings.Contains(body, "token has expired") {
+		t.Errorf("expected response body to contain the specific error message, got: %s", body)
 	}
 }
 
