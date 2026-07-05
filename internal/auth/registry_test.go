@@ -45,8 +45,9 @@ func TestRegisterAndLookupAuthenticator(t *testing.T) {
 }
 
 func TestLookupAuthenticatorUnknownType(t *testing.T) {
-	if _, ok := LookupAuthenticator("definitely-not-registered-type"); ok {
-		t.Fatal("expected LookupAuthenticator to return false for unknown type")
+	typ := "definitely-not-registered-" + t.Name()
+	if _, ok := LookupAuthenticator(typ); ok {
+		t.Fatalf("expected LookupAuthenticator(%q) to return false for unknown type", typ)
 	}
 }
 
@@ -61,8 +62,9 @@ func TestBuildAuthenticatorsEmpty(t *testing.T) {
 }
 
 func TestBuildAuthenticatorsUnknownType(t *testing.T) {
+	typ := "unknown-type-" + t.Name()
 	specs := []config.AuthProviderConfig{
-		{Type: "unknown-type-xyz", Config: map[string]any{}},
+		{Type: typ, Config: map[string]any{}},
 	}
 	_, err := BuildAuthenticators(specs)
 	if err == nil {
@@ -131,4 +133,24 @@ func TestBuildAuthenticatorsNilFromFactory(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil authenticator from factory, got nil")
 	}
+}
+
+func TestRegisterAuthenticatorPanicsOnEmptyType(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for empty type, got none")
+		}
+	}()
+	RegisterAuthenticator("", func(cfg map[string]any) (Authenticator, error) {
+		return &stubAuthenticator{}, nil
+	})
+}
+
+func TestRegisterAuthenticatorPanicsOnNilFactory(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for nil factory, got none")
+		}
+	}()
+	RegisterAuthenticator("test-nil-panic-"+t.Name(), nil)
 }

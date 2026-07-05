@@ -21,7 +21,18 @@ var (
 // RegisterAuthenticator registers a factory for the given authenticator type.
 // Registering the same type twice replaces the previous factory; this keeps
 // registration idempotent so callers (and tests) may re-register freely.
+//
+// It panics on an empty type or a nil factory. These are programmer errors
+// (not config errors); failing fast at registration time turns what would
+// otherwise be a nil-dereference panic inside BuildAuthenticators into a
+// clear message at the registration site.
 func RegisterAuthenticator(typ string, factory AuthenticatorFactory) {
+	if typ == "" {
+		panic("auth: RegisterAuthenticator called with empty type")
+	}
+	if factory == nil {
+		panic("auth: RegisterAuthenticator called with nil factory for type " + typ)
+	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry[typ] = factory

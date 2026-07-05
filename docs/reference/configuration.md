@@ -39,6 +39,7 @@ llm-gateway -config config.example.json
 | `disable` | `false` | Disable client-to-gateway auth. Local testing only. |
 | `api_keys` | `[]` | Literal gateway API keys. |
 | `api_keys_env` | `[]` | Environment variables containing gateway API keys. |
+| `authenticators` | `[]` | Plugin authenticator chain; see [`auth.authenticators`](#authauthenticators) below. |
 
 Clients can authenticate with either:
 
@@ -46,6 +47,24 @@ Clients can authenticate with either:
 Authorization: Bearer <key>
 x-api-key: <key>
 ```
+
+### `auth.authenticators`
+
+Optional plugin authenticator chain. Each entry has a `type` and a `config` object. Authenticators are tried in order; the chain authenticates a request if any authenticator accepts it. Unknown `type`s fail fast at startup.
+
+| `type` | Config | Behavior |
+| --- | --- | --- |
+| `static` | `{ "keys": ["..."] }` | Accepts any of the literal keys in `keys`. Equivalent to the legacy `auth.api_keys`. |
+
+```json
+"auth": {
+  "authenticators": [
+    { "type": "static", "config": { "keys": ["sk-gw-..."] } }
+  ]
+}
+```
+
+The legacy `auth.api_keys` / `auth.api_keys_env` fields still work and are added to the chain alongside any plugin authenticators.
 
 ## `debug`
 

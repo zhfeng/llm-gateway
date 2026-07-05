@@ -56,7 +56,7 @@ func readKeys(cfg map[string]any) ([]string, error) {
 	// JSON path: arrays unmarshal into []interface{} (== []any).
 	ifaceArr, ok := raw.([]any)
 	if !ok {
-		return nil, fmt.Errorf("config.keys must be a []string, got %T", raw)
+		return nil, fmt.Errorf("config.keys must be an array of strings, got %T", raw)
 	}
 	keys := make([]string, 0, len(ifaceArr))
 	for i, v := range ifaceArr {
